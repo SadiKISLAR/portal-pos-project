@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -50,6 +50,10 @@ export default function RegisterPage() {
       length: false,
     },
   });
+  const [referenceStatus, setReferenceStatus] = useState<
+    "idle" | "checking" | "valid" | "invalid"
+  >("idle");
+  const [referenceMessage, setReferenceMessage] = useState<string | null>(null);
 
   const calculatePasswordStrength = (password: string) => {
     const checks = {
@@ -97,7 +101,51 @@ export default function RegisterPage() {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Reference alanı için canlı (on typing) doğrulama
+  useEffect(() => {
+    const reference = formData.reference?.trim();
+
+    // Boş ise hiçbir uyarı gösterme
+    if (!reference) {
+      setReferenceStatus("idle");
+      setReferenceMessage(null);
+      return;
+    }
+
+    // Debounce: kullanıcı yazmayı bırakınca 500ms sonra kontrol et
+    const timeout = setTimeout(async () => {
+      setReferenceStatus("checking");
+      setReferenceMessage(null);
+
+      try {
+        const res = await fetch("/api/reference/validate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ reference }),
+        });
+
+        const data = await res.json();
+
+        if (res.ok && data.valid) {
+          setReferenceStatus("valid");
+          setReferenceMessage(null);
+        } else {
+          setReferenceStatus("invalid");
+          setReferenceMessage(data.error || data.message || "No reference found");
+        }
+      } catch (error) {
+        console.error("Live reference validation failed:", error);
+        setReferenceStatus("invalid");
+        setReferenceMessage("Reference check failed. Please try again.");
+      }
+    }, 500);
+
+    return () => clearTimeout(timeout);
+  }, [formData.reference]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!passwordMatch) {
@@ -108,10 +156,38 @@ export default function RegisterPage() {
       return;
     }
 
-    // TODO: API ile reference doğrulama
+    // Reference (Sales Person custom_sales_person_id) optional:
+    // Eğer doldurulmuşsa ERPNext üzerinde doğrula, boşsa kontrol etme.
+    if (formData.reference) {
+      try {
+        const res = await fetch("/api/reference/validate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ reference: formData.reference }),
+        });
+
+        const data = await res.json();
+        console.log("Reference validate response:", data);
+
+        if (!res.ok || !data.valid) {
+          alert(data.error || data.message || "No ID reference");
+          return;
+        }
+      } catch (error) {
+        console.error("Reference validation failed:", error);
+        alert("Failed to validate reference ID. Please try again.");
+        return;
+      }
+    }
+
     // Save initial form data and navigate to company information step
     if (typeof window !== "undefined") {
-      localStorage.setItem("initialRegistrationData", JSON.stringify({ ...formData, confirmPassword, telephoneCode: formData.telephoneCode }));
+      localStorage.setItem(
+        "initialRegistrationData",
+        JSON.stringify({ ...formData, confirmPassword, telephoneCode: formData.telephoneCode })
+      );
     }
 
     // Navigate to company information page
@@ -137,7 +213,7 @@ export default function RegisterPage() {
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <Label htmlFor="reference" className="text-sm font-semibold text-gray-700">
-                    Reference
+                    Reference (optional)
                   </Label>
                 </div>
                 <Input
@@ -149,6 +225,15 @@ export default function RegisterPage() {
                   onChange={handleChange}
                   className="w-full"
                 />
+                {/* Reference validation message */}
+                {formData.reference && referenceStatus === "invalid" && (
+                  <p className="text-xs text-red-500">
+                    {referenceMessage || "No reference found"}
+                  </p>
+                )}
+                {formData.reference && referenceStatus === "valid" && (
+                  <p className="text-xs text-green-600">Reference found</p>
+                )}
               </div>
 
               {/* Company Name */}
