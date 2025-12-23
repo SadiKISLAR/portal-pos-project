@@ -7,7 +7,7 @@ export async function POST(req: NextRequest) {
 
     if (!reference) {
       return NextResponse.json(
-        { error: "Reference (Sales Person ID) is required" },
+        { error: "Sales Person ID is required" },
         { status: 400 }
       );
     }
@@ -21,29 +21,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ERPNext REST API: filter Sales Person by custom_sales_person_id
-    const filters = encodeURIComponent(
-      JSON.stringify([
-        ["Sales Person", "custom_sales_person_id", "=", reference],
-      ])
-    );
-
-    const fields = encodeURIComponent(
-      JSON.stringify(["name", "sales_person_name", "custom_sales_person_id"])
-    );
-
+    // ERPNext REST API: fetch Sales Person directly by document name (e.g. uh213jdhpd)
+    // This matches the \"ID\" you see at the top of the Sales Person form.
     const result = await erpGet(
-      `/api/resource/Sales Person?filters=${filters}&fields=${fields}`,
+      `/api/resource/Sales Person/${encodeURIComponent(reference)}`,
       token
     );
 
-    const data = result?.data || [];
+    const salesPerson = result?.data || result;
 
-    if (!Array.isArray(data) || data.length === 0) {
+    if (!salesPerson) {
       return NextResponse.json(
         {
           valid: false,
-          message: "No ID reference",
+          message: "Sales Person ID not found",
         },
         { status: 404 }
       );
@@ -51,13 +42,29 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       valid: true,
-      sales_person: data[0],
+      sales_person: salesPerson,
     });
   } catch (e: any) {
-    console.error("Reference validation error:", e);
+    console.error("Sales Person ID validation error:", e);
+
+    const message = typeof e?.message === "string" ? e.message : "";
+
+    // Eğer ERP tarafı 404 / DoesNotExistError döndürdüyse, bunu daha okunabilir bir
+    // \"Sales Person ID not found\" mesajına çevir.
+    if (message.includes("DoesNotExistError") || message.toLowerCase().includes("not found")) {
+      return NextResponse.json(
+        {
+          valid: false,
+          message: "Sales Person ID not found",
+        },
+        { status: 404 }
+      );
+    }
+
+    // Diğer tüm hatalar için genel mesaj
     return NextResponse.json(
       {
-        error: e.message || "Failed to validate reference",
+        error: "Failed to validate Sales Person ID",
       },
       { status: 500 }
     );

@@ -101,7 +101,7 @@ export default function RegisterPage() {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  // Reference alanı için canlı (on typing) doğrulama
+  // Sales Person ID (reference) alanı için canlı (on typing) doğrulama
   useEffect(() => {
     const reference = formData.reference?.trim();
 
@@ -133,12 +133,12 @@ export default function RegisterPage() {
           setReferenceMessage(null);
         } else {
           setReferenceStatus("invalid");
-          setReferenceMessage(data.error || data.message || "No reference found");
+          setReferenceMessage(data.error || data.message || "Sales Person ID not found");
         }
       } catch (error) {
-        console.error("Live reference validation failed:", error);
+        console.error("Live Sales Person ID validation failed:", error);
         setReferenceStatus("invalid");
-        setReferenceMessage("Reference check failed. Please try again.");
+        setReferenceMessage("Sales Person ID check failed. Please try again.");
       }
     }, 500);
 
@@ -156,7 +156,7 @@ export default function RegisterPage() {
       return;
     }
 
-    // Reference (Sales Person custom_sales_person_id) optional:
+    // Sales Person ID (custom_sales_person_id) optional:
     // Eğer doldurulmuşsa ERPNext üzerinde doğrula, boşsa kontrol etme.
     if (formData.reference) {
       try {
@@ -169,15 +169,15 @@ export default function RegisterPage() {
         });
 
         const data = await res.json();
-        console.log("Reference validate response:", data);
+        console.log("Sales Person ID validate response:", data);
 
         if (!res.ok || !data.valid) {
-          alert(data.error || data.message || "No ID reference");
+          alert(data.error || data.message || "Sales Person ID not found");
           return;
         }
       } catch (error) {
-        console.error("Reference validation failed:", error);
-        alert("Failed to validate reference ID. Please try again.");
+        console.error("Sales Person ID validation failed:", error);
+        alert("Failed to validate Sales Person ID. Please try again.");
         return;
       }
     }
@@ -209,30 +209,30 @@ export default function RegisterPage() {
 
           <CardContent>
             <form className="space-y-6" onSubmit={handleSubmit}>
-              {/* Reference Field */}
+              {/* Sales Person ID Field */}
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <Label htmlFor="reference" className="text-sm font-semibold text-gray-700">
-                    Reference (optional)
+                    Sales Person ID (optional)
                   </Label>
                 </div>
                 <Input
                   id="reference"
                   name="reference"
                   type="text"
-                  placeholder="Enter"
+                  placeholder="Enter Sales Person ID"
                   value={formData.reference}
                   onChange={handleChange}
                   className="w-full"
                 />
-                {/* Reference validation message */}
+                {/* Sales Person ID validation message */}
                 {formData.reference && referenceStatus === "invalid" && (
                   <p className="text-xs text-red-500">
-                    {referenceMessage || "No reference found"}
+                    {referenceMessage || "Sales Person ID not found"}
                   </p>
                 )}
                 {formData.reference && referenceStatus === "valid" && (
-                  <p className="text-xs text-green-600">Reference found</p>
+                  <p className="text-xs text-green-600">Sales Person ID found</p>
                 )}
               </div>
 
