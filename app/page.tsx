@@ -51,8 +51,31 @@ export default function LoginPage() {
       sessionStorage.setItem("user", JSON.stringify(data.user));
       sessionStorage.setItem("userEmail", data.email);
 
-      // Başarılı giriş sonrası dashboard'a yönlendir
-      router.push("/dashboard");
+      // Başarılı giriş sonrası Lead kontrolü yap
+      try {
+        const leadCheckResponse = await fetch("/api/erp/check-lead", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ email: data.email }),
+        });
+
+        const leadCheckData = await leadCheckResponse.json();
+
+        // Eğer Lead yoksa, company-information sayfasına yönlendir
+        if (!leadCheckData.hasLead) {
+          router.push("/register/company-information");
+          return;
+        }
+
+        // Lead varsa dashboard'a yönlendir
+        router.push("/dashboard");
+      } catch (leadCheckError) {
+        console.error("Error checking lead:", leadCheckError);
+        // Lead kontrolü başarısız olursa, güvenli tarafta kalıp company-information'a yönlendir
+        router.push("/register/company-information");
+      }
     } catch (err: any) {
       setError(err.message || "Giriş yapılırken bir hata oluştu");
     } finally {

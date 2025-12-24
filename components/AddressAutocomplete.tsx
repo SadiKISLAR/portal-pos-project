@@ -15,10 +15,13 @@ interface AddressAutocompleteProps {
     city: string;
     country: string;
     postalCode: string;
+    federalState?: string;
   }) => void;
   placeholder?: string;
   className?: string;
   required?: boolean;
+  fieldType?: "address" | "city" | "country" | "state" | "postalCode";
+  countryRestriction?: string; // For state and postal code autocomplete
 }
 
 export default function AddressAutocomplete({
@@ -27,6 +30,8 @@ export default function AddressAutocomplete({
   placeholder = "Enter Location",
   className,
   required = false,
+  fieldType = "address",
+  countryRestriction,
 }: AddressAutocompleteProps) {
   const [address, setAddress] = useState(value);
 
@@ -49,6 +54,7 @@ export default function AddressAutocomplete({
       let city = "";
       let country = "";
       let postalCode = "";
+      let federalState = "";
 
       addressComponents.forEach((component) => {
         const types = component.types;
@@ -56,8 +62,11 @@ export default function AddressAutocomplete({
         if (types.includes("street_number") || types.includes("route")) {
           street += component.long_name + " ";
         }
-        if (types.includes("locality") || types.includes("administrative_area_level_1")) {
+        if (types.includes("locality")) {
           city = component.long_name;
+        }
+        if (types.includes("administrative_area_level_1")) {
+          federalState = component.long_name;
         }
         if (types.includes("country")) {
           country = component.long_name;
@@ -67,12 +76,24 @@ export default function AddressAutocomplete({
         }
       });
 
-      onChange(selectedAddress, {
-        street: street.trim(),
-        city,
-        country,
-        postalCode,
-      });
+      // For specific field types, return only the relevant value
+      if (fieldType === "city") {
+        onChange(city || selectedAddress);
+      } else if (fieldType === "country") {
+        onChange(country || selectedAddress);
+      } else if (fieldType === "state") {
+        onChange(federalState || selectedAddress);
+      } else if (fieldType === "postalCode") {
+        onChange(postalCode || selectedAddress);
+      } else {
+        onChange(selectedAddress, {
+          street: street.trim(),
+          city,
+          country,
+          postalCode,
+          federalState,
+        });
+      }
     } catch (error) {
       console.error("Error fetching address details:", error);
       onChange(selectedAddress);
@@ -85,7 +106,17 @@ export default function AddressAutocomplete({
       onChange={setAddress}
       onSelect={handleSelect}
       searchOptions={{
-        types: ["address"],
+        ...(fieldType === "city" && { types: ["(cities)"] }),
+        ...(fieldType === "country" && { types: ["(regions)"] }),
+        ...(fieldType === "state" && { 
+          types: ["(regions)"],
+          ...(countryRestriction && { componentRestrictions: { country: countryRestriction } })
+        }),
+        ...(fieldType === "postalCode" && { 
+          types: ["postal_code"],
+          ...(countryRestriction && { componentRestrictions: { country: countryRestriction } })
+        }),
+        ...(fieldType === "address" && { types: ["address"] }),
       }}
     >
       {({ getInputProps, suggestions, getSuggestionItemProps, loading }) => (

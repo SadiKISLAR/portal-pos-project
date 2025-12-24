@@ -159,14 +159,76 @@ export default function CompanyInformationPage() {
     updateFormData({ restaurants: newRestaurants });
   };
 
-  const handleNext = () => {
+  const handleNext = async () => {
     // Basic validation - can be enhanced
     if (!formData.companyInfo.companyName || !formData.companyInfo.vatIdentificationNumber) {
       alert("Please fill in required fields");
       return;
     }
 
-    // Navigate to next step
+    // Get user email from sessionStorage (if logged in) or localStorage (during registration)
+    let userEmail = "";
+    if (typeof window !== "undefined") {
+      // Önce sessionStorage'dan kontrol et (login olmuş kullanıcılar için)
+      const sessionEmail = sessionStorage.getItem("userEmail");
+      if (sessionEmail) {
+        userEmail = sessionEmail;
+      } else {
+        // SessionStorage'da yoksa, localStorage'dan kontrol et (registration flow sırasında)
+        const initialData = localStorage.getItem("initialRegistrationData");
+        if (initialData) {
+          try {
+            const parsed = JSON.parse(initialData);
+            userEmail = parsed.email || "";
+          } catch (error) {
+            console.error("Error parsing initial registration data:", error);
+          }
+        }
+      }
+    }
+
+    if (!userEmail) {
+      alert("User email not found. Please login or complete the initial registration first.");
+      return;
+    }
+
+    // Create Lead in ERPNext
+    try {
+      const res = await fetch("/api/erp/create-lead", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: userEmail,
+          companyInfo: formData.companyInfo,
+          businesses: businesses,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        alert(data.error || "Failed to create lead in ERP. Please try again.");
+        return;
+      }
+
+      console.log("Lead created successfully:", data.lead);
+    } catch (error) {
+      console.error("Lead creation failed:", error);
+      alert("Failed to create lead in ERP. Please try again.");
+      return;
+    }
+
+    // Check if user is logged in (has sessionStorage email)
+    // If logged in, redirect to dashboard; otherwise continue registration flow
+    if (typeof window !== "undefined" && sessionStorage.getItem("userEmail")) {
+      // User is logged in, redirect to dashboard
+      router.push("/dashboard");
+      return;
+    }
+
+    // Continue with registration flow for new users
     goToStep(2);
     router.push("/register/company-representative");
   };
@@ -274,78 +336,66 @@ export default function CompanyInformationPage() {
                   />
                 </div>
 
-                {/* City and Postal code - Side by side */}
+                {/* City and Country - Side by side */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="companyCity" className="text-sm font-semibold text-gray-700">
                       City
                     </Label>
-                    <Input
-                      id="companyCity"
-                      placeholder="Enter City"
+                    <AddressAutocomplete
                       value={formData.companyInfo.city}
-                      onChange={(e) => handleCompanyInfoChange("city", e.target.value)}
+                      onChange={(address) => handleCompanyInfoChange("city", address)}
+                      placeholder="Enter City"
                       className="w-full"
+                      fieldType="city"
                     />
                   </div>
-
                   <div className="space-y-2">
-                    <Label htmlFor="companyPostalCode" className="text-sm font-semibold text-gray-700">
-                      Postal code
+                    <Label htmlFor="companyCountry" className="text-sm font-semibold text-gray-700">
+                      Country <span className="text-red-500">*</span>
                     </Label>
-                    <Input
-                      id="companyPostalCode"
-                      placeholder="enter"
-                      value={formData.companyInfo.zipCode}
-                      onChange={(e) => handleCompanyInfoChange("zipCode", e.target.value)}
+                    <AddressAutocomplete
+                      value={formData.companyInfo.country}
+                      onChange={(address) => {
+                        handleCompanyInfoChange("country", address);
+                        handleCompanyInfoChange("federalState", ""); // Reset state when country changes
+                      }}
+                      placeholder="Enter Country"
                       className="w-full"
+                      fieldType="country"
+                      required
                     />
                   </div>
                 </div>
 
-                {/* Federal State and Country - Side by side */}
+                {/* Federal State and Postal Code - Side by side */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="companyState" className="text-sm font-semibold text-gray-700">
                       Federal State <span className="text-red-500">*</span>
                     </Label>
-                    <select
-                      id="companyState"
+                    <AddressAutocomplete
                       value={formData.companyInfo.federalState}
-                      onChange={(e) => handleCompanyInfoChange("federalState", e.target.value)}
-                      disabled={!formData.companyInfo.country}
-                      className="w-full h-10 px-3 rounded-md border border-gray-300 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-green-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
-                    >
-                      <option value="">Select State</option>
-                      {formData.companyInfo.country &&
-                        states[formData.companyInfo.country]?.map((state) => (
-                          <option key={state} value={state}>
-                            {state}
-                          </option>
-                        ))}
-                    </select>
+                      onChange={(address) => handleCompanyInfoChange("federalState", address)}
+                      placeholder="Enter Federal State"
+                      className="w-full"
+                      fieldType="state"
+                      countryRestriction={formData.companyInfo.country}
+                      required
+                    />
                   </div>
-
                   <div className="space-y-2">
-                    <Label htmlFor="companyCountry" className="text-sm font-semibold text-gray-700">
-                      Country <span className="text-red-500">*</span>
+                    <Label htmlFor="companyPostalCode" className="text-sm font-semibold text-gray-700">
+                      Postal code
                     </Label>
-                    <select
-                      id="companyCountry"
-                      value={formData.companyInfo.country}
-                      onChange={(e) => {
-                        handleCompanyInfoChange("country", e.target.value);
-                        handleCompanyInfoChange("federalState", ""); // Reset state when country changes
-                      }}
-                      className="w-full h-10 px-3 rounded-md border border-gray-300 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-                    >
-                      <option value="">Select Country</option>
-                      {countries.map((country) => (
-                        <option key={country} value={country}>
-                          {country}
-                        </option>
-                      ))}
-                    </select>
+                    <AddressAutocomplete
+                      value={formData.companyInfo.zipCode}
+                      onChange={(address) => handleCompanyInfoChange("zipCode", address)}
+                      placeholder="Enter Postal Code"
+                      className="w-full"
+                      fieldType="postalCode"
+                      countryRestriction={formData.companyInfo.country}
+                    />
                   </div>
                 </div>
               </div>
