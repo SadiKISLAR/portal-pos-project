@@ -979,8 +979,7 @@ export default function CompanyInformationPage() {
                           className="w-full"
                         />
                       </div>
-                      
-
+                      {/* Postal code */}
                       <div className="space-y-2">
                         <Label htmlFor={`businessPostalCode-${index}`} className="text-sm font-semibold text-gray-700">
                           Postal code
