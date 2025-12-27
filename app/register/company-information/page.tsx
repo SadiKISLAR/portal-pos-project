@@ -102,6 +102,7 @@ export default function CompanyInformationPage() {
       });
       updateFormData({ restaurants: newRestaurants });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [restaurantCount, formData.currentStep, formData.restaurants.length, goToStep, updateFormData]);
 
   // Load company information separately - only once
