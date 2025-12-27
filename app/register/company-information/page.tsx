@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useRegistration } from "@/contexts/RegistrationContext";
 import ProgressBar from "@/components/ProgressBar";
@@ -18,6 +18,7 @@ export default function CompanyInformationPage() {
   const [restaurantCount, setRestaurantCount] = useState(
     formData.companyInfo.restaurantCount || "1"
   );
+  const hasLoadedCompanyInfo = useRef(false);
   
   // Business Information state - Array to support multiple businesses
   const [businesses, setBusinesses] = useState([
@@ -80,90 +81,6 @@ export default function CompanyInformationPage() {
     setBusinesses(updatedBusinesses);
   };
 
-  const loadCompanyInfo = useCallback(async () => {
-    // Get user email
-    let userEmail = "";
-    if (typeof window !== "undefined") {
-      const sessionEmail = sessionStorage.getItem("userEmail");
-      if (sessionEmail) {
-        userEmail = sessionEmail;
-      } else {
-        const initialData = localStorage.getItem("initialRegistrationData");
-        if (initialData) {
-          try {
-            const parsed = JSON.parse(initialData);
-            userEmail = parsed.email || "";
-          } catch (error) {
-            console.error("Error parsing initial data:", error);
-          }
-        }
-      }
-    }
-
-    if (!userEmail) {
-      return; // Email yoksa Lead'den veri çekemeyiz
-    }
-
-    try {
-      const res = await fetch("/api/erp/get-lead", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ email: userEmail }),
-      });
-
-      const data = await res.json();
-
-      if (data.success && data.lead) {
-        const lead = data.lead;
-        
-        // Company bilgilerini form'a yükle
-        if (lead.company_name || lead.custom_vat_identification_number || lead.custom_tax_id_number || 
-            lead.address_line1 || lead.city || lead.country) {
-          const companyInfo: any = {};
-          
-          if (lead.company_name) companyInfo.companyName = lead.company_name;
-          if (lead.custom_vat_identification_number) companyInfo.vatIdentificationNumber = lead.custom_vat_identification_number;
-          // Not: ERPNext'te field adı custom_custom_tax_id_number (double custom prefix)
-          if (lead.custom_custom_tax_id_number) {
-            companyInfo.taxIdNumber = lead.custom_custom_tax_id_number;
-          } else if (lead.custom_tax_id_number) {
-            // Fallback: Eğer eski field adı varsa onu da kontrol et
-            companyInfo.taxIdNumber = lead.custom_tax_id_number;
-          }
-          // address_line1 ve address_line2'yi birleştir (eğer ikisi de varsa)
-          if (lead.address_line1 || lead.address_line2) {
-            const streetParts = [];
-            if (lead.address_line1) streetParts.push(lead.address_line1);
-            if (lead.address_line2) streetParts.push(lead.address_line2);
-            companyInfo.street = streetParts.join(" ");
-          }
-          if (lead.city) companyInfo.city = lead.city;
-          if (lead.pincode) companyInfo.zipCode = lead.pincode;
-          if (lead.state) companyInfo.federalState = lead.state;
-          if (lead.country) companyInfo.country = lead.country;
-
-          // Form data'yı güncelle - get current formData from context
-          const currentFormData = formData;
-          updateFormData({
-            companyInfo: {
-              ...currentFormData.companyInfo,
-              ...companyInfo,
-            },
-          });
-        }
-
-        // Businesses array'ini yükle (get-lead endpoint'inde zaten parse edilmiş)
-        if (lead.businesses && Array.isArray(lead.businesses) && lead.businesses.length > 0) {
-          setBusinesses(lead.businesses);
-        }
-      }
-    } catch (error) {
-      console.error("Error loading company info:", error);
-      // Hata olsa bile devam et, form boş kalabilir
-    }
-  }, [formData, updateFormData]);
 
   useEffect(() => {
     // Ensure we're on step 1
@@ -185,10 +102,101 @@ export default function CompanyInformationPage() {
       });
       updateFormData({ restaurants: newRestaurants });
     }
+  }, [restaurantCount, formData.currentStep, formData.restaurants.length, goToStep, updateFormData]);
 
-    // Load company information from Lead if available
+  // Load company information separately - only once
+  useEffect(() => {
+    // Sadece bir kez yükle
+    if (hasLoadedCompanyInfo.current) {
+      return;
+    }
+    hasLoadedCompanyInfo.current = true;
+
+    const loadCompanyInfo = async () => {
+      // Get user email
+      let userEmail = "";
+      if (typeof window !== "undefined") {
+        const sessionEmail = sessionStorage.getItem("userEmail");
+        if (sessionEmail) {
+          userEmail = sessionEmail;
+        } else {
+          const initialData = localStorage.getItem("initialRegistrationData");
+          if (initialData) {
+            try {
+              const parsed = JSON.parse(initialData);
+              userEmail = parsed.email || "";
+            } catch (error) {
+              console.error("Error parsing initial data:", error);
+            }
+          }
+        }
+      }
+
+      if (!userEmail) {
+        hasLoadedCompanyInfo.current = false; // Email yoksa tekrar deneyebilmek için
+        return;
+      }
+
+      try {
+        const res = await fetch("/api/erp/get-lead", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ email: userEmail }),
+        });
+
+        const data = await res.json();
+
+        if (data.success && data.lead) {
+          const lead = data.lead;
+          
+          // Company bilgilerini form'a yükle
+          if (lead.company_name || lead.custom_vat_identification_number || lead.custom_tax_id_number || 
+              lead.address_line1 || lead.city || lead.country) {
+            const companyInfo: any = {};
+            
+            if (lead.company_name) companyInfo.companyName = lead.company_name;
+            if (lead.custom_vat_identification_number) companyInfo.vatIdentificationNumber = lead.custom_vat_identification_number;
+            // Not: ERPNext'te field adı custom_custom_tax_id_number (double custom prefix)
+            if (lead.custom_custom_tax_id_number) {
+              companyInfo.taxIdNumber = lead.custom_custom_tax_id_number;
+            } else if (lead.custom_tax_id_number) {
+              // Fallback: Eğer eski field adı varsa onu da kontrol et
+              companyInfo.taxIdNumber = lead.custom_tax_id_number;
+            }
+            // address_line1 ve address_line2'yi birleştir (eğer ikisi de varsa)
+            if (lead.address_line1 || lead.address_line2) {
+              const streetParts = [];
+              if (lead.address_line1) streetParts.push(lead.address_line1);
+              if (lead.address_line2) streetParts.push(lead.address_line2);
+              companyInfo.street = streetParts.join(" ");
+            }
+            if (lead.city) companyInfo.city = lead.city;
+            if (lead.pincode) companyInfo.zipCode = lead.pincode;
+            if (lead.state) companyInfo.federalState = lead.state;
+            if (lead.country) companyInfo.country = lead.country;
+
+            // Form data'yı güncelle - sadece yeni değerleri gönder
+            // Bu fonksiyon sadece bir kez çalışacağı için formData.companyInfo genellikle boş olacak
+            updateFormData({
+              companyInfo: companyInfo,
+            });
+          }
+
+          // Businesses array'ini yükle (get-lead endpoint'inde zaten parse edilmiş)
+          if (lead.businesses && Array.isArray(lead.businesses) && lead.businesses.length > 0) {
+            setBusinesses(lead.businesses);
+          }
+        }
+      } catch (error) {
+        console.error("Error loading company info:", error);
+        hasLoadedCompanyInfo.current = false; // Hata durumunda tekrar deneyebilmek için
+      }
+    };
+
     loadCompanyInfo();
-  }, [restaurantCount, formData.currentStep, formData.restaurants, goToStep, loadCompanyInfo, updateFormData]);
+  }, [updateFormData]);
 
   const handleCompanyInfoChange = (field: keyof typeof formData.companyInfo, value: string) => {
     updateFormData({
