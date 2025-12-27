@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useRegistration } from "@/contexts/RegistrationContext";
 import ProgressBar from "@/components/ProgressBar";
@@ -26,17 +26,7 @@ export default function RegistrationDocumentsPage() {
   const idInputRef = useRef<HTMLInputElement>(null);
   const shareholdersInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    // Ensure we're on step 4
-    if (formData.currentStep !== 4) {
-      goToStep(4);
-    }
-
-    // Load documents information from Lead if available
-    loadDocumentsInfo();
-  }, []);
-
-  const loadDocumentsInfo = async () => {
+  const loadDocumentsInfo = useCallback(async () => {
     // Get user email
     let userEmail = "";
     if (typeof window !== "undefined") {
@@ -97,7 +87,17 @@ export default function RegistrationDocumentsPage() {
       console.error("Error loading documents info:", error);
       // Hata olsa bile devam et
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    // Ensure we're on step 4
+    if (formData.currentStep !== 4) {
+      goToStep(4);
+    }
+
+    // Load documents information from Lead if available
+    loadDocumentsInfo();
+  }, [formData.currentStep, goToStep, loadDocumentsInfo]);
 
   const handleFileSelect = (
     files: FileList | null,

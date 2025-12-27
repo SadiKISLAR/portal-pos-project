@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useRegistration } from "@/contexts/RegistrationContext";
 import ProgressBar from "@/components/ProgressBar";
@@ -62,17 +62,7 @@ export default function PaymentInformationPage() {
   const [ibanError, setIbanError] = useState("");
   const [ibanTouched, setIbanTouched] = useState(false);
 
-  useEffect(() => {
-    // Ensure we're on step 3
-    if (formData.currentStep !== 3) {
-      goToStep(3);
-    }
-
-    // Load payment information from Lead if available
-    loadPaymentInfo();
-  }, []);
-
-  const loadPaymentInfo = async () => {
+  const loadPaymentInfo = useCallback(async () => {
     // Get user email
     let userEmail = "";
     if (typeof window !== "undefined") {
@@ -133,7 +123,17 @@ export default function PaymentInformationPage() {
       console.error("Error loading payment info:", error);
       // Hata olsa bile devam et, form boş kalabilir
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    // Ensure we're on step 3
+    if (formData.currentStep !== 3) {
+      goToStep(3);
+    }
+
+    // Load payment information from Lead if available
+    loadPaymentInfo();
+  }, [formData.currentStep, goToStep, loadPaymentInfo]);
 
   const handleChange = (field: string, value: string) => {
     setPaymentData((prev) => ({

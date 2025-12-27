@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useRegistration } from "@/contexts/RegistrationContext";
 import ProgressBar from "@/components/ProgressBar";
@@ -80,32 +80,7 @@ export default function CompanyInformationPage() {
     setBusinesses(updatedBusinesses);
   };
 
-  useEffect(() => {
-    // Ensure we're on step 1
-    if (formData.currentStep !== 1) {
-      goToStep(1);
-    }
-
-    // Initialize restaurants array based on restaurant count
-    const count = parseInt(restaurantCount) || 1;
-    if (formData.restaurants.length !== count) {
-      const newRestaurants = Array.from({ length: count }, (_, index) => {
-        return formData.restaurants[index] || {
-          restaurantName: "",
-          street: "",
-          city: "",
-          country: "",
-          federalState: "",
-        };
-      });
-      updateFormData({ restaurants: newRestaurants });
-    }
-
-    // Load company information from Lead if available
-    loadCompanyInfo();
-  }, [restaurantCount]);
-
-  const loadCompanyInfo = async () => {
+  const loadCompanyInfo = useCallback(async () => {
     // Get user email
     let userEmail = "";
     if (typeof window !== "undefined") {
@@ -169,10 +144,11 @@ export default function CompanyInformationPage() {
           if (lead.state) companyInfo.federalState = lead.state;
           if (lead.country) companyInfo.country = lead.country;
 
-          // Form data'yı güncelle
+          // Form data'yı güncelle - get current formData from context
+          const currentFormData = formData;
           updateFormData({
             companyInfo: {
-              ...formData.companyInfo,
+              ...currentFormData.companyInfo,
               ...companyInfo,
             },
           });
@@ -187,7 +163,32 @@ export default function CompanyInformationPage() {
       console.error("Error loading company info:", error);
       // Hata olsa bile devam et, form boş kalabilir
     }
-  };
+  }, [formData, updateFormData]);
+
+  useEffect(() => {
+    // Ensure we're on step 1
+    if (formData.currentStep !== 1) {
+      goToStep(1);
+    }
+
+    // Initialize restaurants array based on restaurant count
+    const count = parseInt(restaurantCount) || 1;
+    if (formData.restaurants.length !== count) {
+      const newRestaurants = Array.from({ length: count }, (_, index) => {
+        return formData.restaurants[index] || {
+          restaurantName: "",
+          street: "",
+          city: "",
+          country: "",
+          federalState: "",
+        };
+      });
+      updateFormData({ restaurants: newRestaurants });
+    }
+
+    // Load company information from Lead if available
+    loadCompanyInfo();
+  }, [restaurantCount, formData.currentStep, formData.restaurants, goToStep, loadCompanyInfo, updateFormData]);
 
   const handleCompanyInfoChange = (field: keyof typeof formData.companyInfo, value: string) => {
     updateFormData({

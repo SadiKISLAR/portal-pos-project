@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useRegistration } from "@/contexts/RegistrationContext";
 import ProgressBar from "@/components/ProgressBar";
@@ -39,20 +39,7 @@ export default function ServicesPage() {
   const [acceptedTerms, setAcceptedTerms] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    // Ensure we're on step 2
-    if (formData.currentStep !== 2) {
-      goToStep(2);
-    }
-
-    // Load services from ERPNext
-    fetchServices();
-    
-    // Load selected services from Lead if available
-    loadSelectedServices();
-  }, []);
-
-  const loadSelectedServices = async () => {
+  const loadSelectedServices = useCallback(async () => {
     // Get user email
     let userEmail = "";
     if (typeof window !== "undefined") {
@@ -107,9 +94,9 @@ export default function ServicesPage() {
       console.error("Error loading selected services:", error);
       // Hata olsa bile devam et
     }
-  };
+  }, []);
 
-  const fetchServices = async () => {
+  const fetchServices = useCallback(async () => {
     try {
       const response = await fetch("/api/erp/get-services");
       const data = await response.json();
@@ -132,7 +119,20 @@ export default function ServicesPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    // Ensure we're on step 2
+    if (formData.currentStep !== 2) {
+      goToStep(2);
+    }
+
+    // Load services from ERPNext
+    fetchServices();
+    
+    // Load selected services from Lead if available
+    loadSelectedServices();
+  }, [formData.currentStep, goToStep, fetchServices, loadSelectedServices]);
 
   const handleServiceToggle = (serviceId: string) => {
     setSelectedServices((prev) => {
