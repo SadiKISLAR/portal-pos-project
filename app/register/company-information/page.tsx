@@ -19,6 +19,8 @@ export default function CompanyInformationPage() {
     formData.companyInfo.restaurantCount || "1"
   );
   const hasLoadedCompanyInfo = useRef(false);
+  // AddressAutocomplete ile seçilen son street bilgisini saklamak için
+  const lastSelectedStreetRef = useRef<string | null>(null);
   
   // Business Information state - Array to support multiple businesses
   const [businesses, setBusinesses] = useState([
@@ -114,21 +116,25 @@ export default function CompanyInformationPage() {
     hasLoadedCompanyInfo.current = true;
 
     const loadCompanyInfo = async () => {
-      // Get user email
+      // Get user email - prioritize registration flow email over session storage
       let userEmail = "";
       if (typeof window !== "undefined") {
-        const sessionEmail = sessionStorage.getItem("userEmail");
-        if (sessionEmail) {
-          userEmail = sessionEmail;
-        } else {
-          const initialData = localStorage.getItem("initialRegistrationData");
-          if (initialData) {
-            try {
-              const parsed = JSON.parse(initialData);
-              userEmail = parsed.email || "";
-            } catch (error) {
-              console.error("Error parsing initial data:", error);
-            }
+        // Önce registration flow'undaki email'i kontrol et (en güncel email bu)
+        const initialData = localStorage.getItem("initialRegistrationData");
+        if (initialData) {
+          try {
+            const parsed = JSON.parse(initialData);
+            userEmail = parsed.email || "";
+          } catch (error) {
+            console.error("Error parsing initial data:", error);
+          }
+        }
+        
+        // Eğer registration flow'unda email yoksa, sessionStorage'dan al (login olmuş kullanıcılar için)
+        if (!userEmail) {
+          const sessionEmail = sessionStorage.getItem("userEmail");
+          if (sessionEmail) {
+            userEmail = sessionEmail;
           }
         }
       }
@@ -167,15 +173,24 @@ export default function CompanyInformationPage() {
               companyInfo.taxIdNumber = lead.custom_tax_id_number;
             }
             // address_line1 ve address_line2'yi birleştir (eğer ikisi de varsa)
-            if (lead.address_line1 || lead.address_line2) {
+            // Önce standart field'ları kontrol et, yoksa custom field'ları kullan
+            const addressLine1 = lead.address_line1 || lead.custom_address_line1;
+            const addressLine2 = lead.address_line2;
+            if (addressLine1 || addressLine2) {
               const streetParts = [];
-              if (lead.address_line1) streetParts.push(lead.address_line1);
-              if (lead.address_line2) streetParts.push(lead.address_line2);
+              if (addressLine1) streetParts.push(addressLine1);
+              if (addressLine2) streetParts.push(addressLine2);
               companyInfo.street = streetParts.join(" ");
             }
             if (lead.city) companyInfo.city = lead.city;
-            if (lead.pincode) companyInfo.zipCode = lead.pincode;
-            if (lead.state) companyInfo.federalState = lead.state;
+            // pincode için hem standart hem custom field'ı kontrol et
+            if (lead.pincode || lead.custom_pincode) {
+              companyInfo.zipCode = lead.pincode || lead.custom_pincode;
+            }
+            // state için hem standart hem custom field'ı kontrol et
+            if (lead.state || lead.custom_state) {
+              companyInfo.federalState = lead.state || lead.custom_state;
+            }
             if (lead.country) companyInfo.country = lead.country;
 
             // Form data'yı güncelle - sadece yeni değerleri gönder
@@ -213,10 +228,13 @@ export default function CompanyInformationPage() {
     details?: { street: string; city: string; country: string; postalCode: string }
   ) => {
     if (details) {
-      handleCompanyInfoChange("street", details.street || address);
+      const streetValue = details.street || address;
+      lastSelectedStreetRef.current = streetValue;
+      handleCompanyInfoChange("street", streetValue);
       if (details.city) handleCompanyInfoChange("city", details.city);
       if (details.country) handleCompanyInfoChange("country", details.country);
     } else {
+      lastSelectedStreetRef.current = address;
       handleCompanyInfoChange("street", address);
     }
   };
@@ -271,23 +289,25 @@ export default function CompanyInformationPage() {
       return;
     }
 
-    // Get user email from sessionStorage (if logged in) or localStorage (during registration)
+    // Get user email - prioritize registration flow email over session storage
     let userEmail = "";
     if (typeof window !== "undefined") {
-      // Önce sessionStorage'dan kontrol et (login olmuş kullanıcılar için)
-      const sessionEmail = sessionStorage.getItem("userEmail");
-      if (sessionEmail) {
-        userEmail = sessionEmail;
-      } else {
-        // SessionStorage'da yoksa, localStorage'dan kontrol et (registration flow sırasında)
-        const initialData = localStorage.getItem("initialRegistrationData");
-        if (initialData) {
-          try {
-            const parsed = JSON.parse(initialData);
-            userEmail = parsed.email || "";
-          } catch (error) {
-            console.error("Error parsing initial registration data:", error);
-          }
+      // Önce registration flow'undaki email'i kontrol et (en güncel email bu)
+      const initialData = localStorage.getItem("initialRegistrationData");
+      if (initialData) {
+        try {
+          const parsed = JSON.parse(initialData);
+          userEmail = parsed.email || "";
+        } catch (error) {
+          console.error("Error parsing initial registration data:", error);
+        }
+      }
+      
+      // Eğer registration flow'unda email yoksa, sessionStorage'dan al (login olmuş kullanıcılar için)
+      if (!userEmail) {
+        const sessionEmail = sessionStorage.getItem("userEmail");
+        if (sessionEmail) {
+          userEmail = sessionEmail;
         }
       }
     }
@@ -299,8 +319,32 @@ export default function CompanyInformationPage() {
 
     // Update Lead in ERPNext (create if not exists)
     try {
-      console.log("Sending to API - companyInfo:", JSON.stringify(formData.companyInfo, null, 2));
-      console.log("taxIdNumber value:", formData.companyInfo.taxIdNumber);
+      
+      // companyInfo objesini temizle - sadece dolu alanları gönder
+      const cleanCompanyInfo: any = {};
+      if (formData.companyInfo.companyName) cleanCompanyInfo.companyName = formData.companyInfo.companyName;
+      if (formData.companyInfo.restaurantCount) cleanCompanyInfo.restaurantCount = formData.companyInfo.restaurantCount;
+      if (formData.companyInfo.taxIdNumber) cleanCompanyInfo.taxIdNumber = formData.companyInfo.taxIdNumber;
+      if (formData.companyInfo.vatIdentificationNumber) cleanCompanyInfo.vatIdentificationNumber = formData.companyInfo.vatIdentificationNumber;
+
+      // Street alanı için: önce AddressAutocomplete'ten gelen son değeri kullan,
+      // yoksa formData'dan al, yine yoksa city + zip + country'den üret
+      let streetForLead =
+        (lastSelectedStreetRef.current || formData.companyInfo.street || "").trim();
+      if (!streetForLead) {
+        const streetParts: string[] = [];
+        if (formData.companyInfo.city) streetParts.push(formData.companyInfo.city);
+        if (formData.companyInfo.zipCode) streetParts.push(formData.companyInfo.zipCode);
+        if (formData.companyInfo.country) streetParts.push(formData.companyInfo.country);
+        streetForLead = streetParts.join(" ").trim();
+      }
+      if (streetForLead) cleanCompanyInfo.street = streetForLead;
+
+      if (formData.companyInfo.city) cleanCompanyInfo.city = formData.companyInfo.city;
+      if (formData.companyInfo.country) cleanCompanyInfo.country = formData.companyInfo.country;
+      if (formData.companyInfo.federalState) cleanCompanyInfo.federalState = formData.companyInfo.federalState;
+      if (formData.companyInfo.zipCode) cleanCompanyInfo.zipCode = formData.companyInfo.zipCode;
+      
       
       const res = await fetch("/api/erp/update-lead", {
         method: "POST",
@@ -309,7 +353,7 @@ export default function CompanyInformationPage() {
         },
         body: JSON.stringify({
           email: userEmail,
-          companyInfo: formData.companyInfo,
+          companyInfo: cleanCompanyInfo,
           businesses: businesses,
         }),
       });
@@ -321,7 +365,6 @@ export default function CompanyInformationPage() {
         return;
       }
 
-      console.log("Lead updated successfully:", data.lead);
     } catch (error) {
       console.error("Lead update failed:", error);
       alert("Failed to update lead in ERP. Please try again.");
@@ -430,7 +473,15 @@ export default function CompanyInformationPage() {
                   </Label>
                   <AddressAutocomplete
                     value={formData.companyInfo.street}
-                    onChange={handleAddressSelect}
+                    onChange={(address, details) => {
+                      // Eğer details varsa (suggestion seçildi), handleAddressSelect kullan
+                      if (details) {
+                        handleAddressSelect(address, details);
+                      } else {
+                        // Manuel yazıldığında direkt street olarak kaydet
+                        handleCompanyInfoChange("street", address);
+                      }
+                    }}
                     placeholder="Enter Location"
                     className="w-full"
                     required
@@ -697,12 +748,13 @@ export default function CompanyInformationPage() {
                         <Label htmlFor="businessCity-0" className="text-sm font-semibold text-gray-700">
                           City
                         </Label>
-                        <Input
-                          id="businessCity-0"
-                          placeholder="Enter City"
+                        <AddressAutocomplete
                           value={businesses[0].city}
-                          onChange={(e) => updateBusiness(0, "city", e.target.value)}
+                          onChange={(address) => updateBusiness(0, "city", address)}
+                          placeholder="Enter City"
                           className="w-full"
+                          fieldType="city"
+                          countryRestriction={businesses[0].country}
                         />
                       </div>
 
@@ -710,12 +762,13 @@ export default function CompanyInformationPage() {
                         <Label htmlFor="businessPostalCode-0" className="text-sm font-semibold text-gray-700">
                           Postal code
                         </Label>
-                        <Input
-                          id="businessPostalCode-0"
-                          placeholder="enter"
+                        <AddressAutocomplete
                           value={businesses[0].postalCode}
-                          onChange={(e) => updateBusiness(0, "postalCode", e.target.value)}
+                          onChange={(address) => updateBusiness(0, "postalCode", address)}
+                          placeholder="Enter Postal Code"
                           className="w-full"
+                          fieldType="postalCode"
+                          countryRestriction={businesses[0].country}
                         />
                       </div>
                     </div>
@@ -971,12 +1024,13 @@ export default function CompanyInformationPage() {
                         <Label htmlFor={`businessCity-${index}`} className="text-sm font-semibold text-gray-700">
                           City
                         </Label>
-                        <Input
-                          id={`businessCity-${index}`}
-                          placeholder="Enter City"
+                        <AddressAutocomplete
                           value={business.city}
-                          onChange={(e) => updateBusiness(index, "city", e.target.value)}
+                          onChange={(address) => updateBusiness(index, "city", address)}
+                          placeholder="Enter City"
                           className="w-full"
+                          fieldType="city"
+                          countryRestriction={business.country}
                         />
                       </div>
                       {/* Postal code */}
@@ -984,12 +1038,13 @@ export default function CompanyInformationPage() {
                         <Label htmlFor={`businessPostalCode-${index}`} className="text-sm font-semibold text-gray-700">
                           Postal code
                         </Label>
-                        <Input
-                          id={`businessPostalCode-${index}`}
-                          placeholder="enter"
+                        <AddressAutocomplete
                           value={business.postalCode}
-                          onChange={(e) => updateBusiness(index, "postalCode", e.target.value)}
+                          onChange={(address) => updateBusiness(index, "postalCode", address)}
+                          placeholder="Enter Postal Code"
                           className="w-full"
+                          fieldType="postalCode"
+                          countryRestriction={business.country}
                         />
                       </div>
                     </div>

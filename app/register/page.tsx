@@ -193,7 +193,6 @@ export default function RegisterPage() {
         });
 
         const data = await res.json();
-        console.log("Reference validate response:", data);
 
         if (!res.ok || !data.valid) {
           alert(data.error || data.message || "Reference not found");
@@ -248,6 +247,12 @@ export default function RegisterPage() {
         "initialRegistrationData",
         JSON.stringify({ ...formData, confirmPassword, telephoneCode: formData.telephoneCode })
       );
+      // Yeni kullanıcı kaydı başladığında eski registration data'yı temizle
+      // Böylece form boş başlayacak ve sadece Lead'den veri yüklenecek
+      localStorage.removeItem("registrationData");
+      // Registration flow'unda email'i sessionStorage'a kaydet
+      // Böylece company information sayfasında doğru email kullanılacak
+      sessionStorage.setItem("userEmail", formData.email);
     }
 
     // Navigate to company information page

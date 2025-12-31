@@ -100,10 +100,18 @@ export default function AddressAutocomplete({
     }
   };
 
+  const handleChange = (newAddress: string) => {
+    setAddress(newAddress);
+    // For specific field types, call onChange immediately when user types
+    if (fieldType === "city" || fieldType === "country" || fieldType === "state" || fieldType === "postalCode") {
+      onChange(newAddress);
+    }
+  };
+
   return (
     <PlacesAutocomplete
       value={address}
-      onChange={setAddress}
+      onChange={handleChange}
       onSelect={handleSelect}
       searchOptions={{
         ...(fieldType === "city" && { types: ["(cities)"] }),

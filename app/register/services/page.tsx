@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useRegistration } from "@/contexts/RegistrationContext";
 import ProgressBar from "@/components/ProgressBar";
@@ -9,7 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import Image from "next/image";
+// Image component'i kaldırıldı, normal img tag kullanıyoruz (external URL'ler için)
 
 interface ServiceContract {
   name: string;
@@ -38,7 +38,8 @@ export default function ServicesPage() {
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
   const [acceptedTerms, setAcceptedTerms] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
-
+  const hasLoadedServices = useRef(false);
+  const hasLoadedSelectedServices = useRef(false);
   const loadSelectedServices = useCallback(async () => {
     // Get user email
     let userEmail = "";
@@ -74,48 +75,73 @@ export default function ServicesPage() {
 
       const data = await res.json();
 
-      if (data.success && data.lead && data.lead.custom_selected_services) {
-        try {
-          const savedServices = JSON.parse(data.lead.custom_selected_services);
-          if (Array.isArray(savedServices) && savedServices.length > 0) {
-            setSelectedServices(savedServices);
-            // Terms'leri de otomatik kabul et (kullanıcı daha önce kabul etmişti)
-            const termsMap: Record<string, boolean> = {};
-            savedServices.forEach((serviceId: string) => {
-              termsMap[serviceId] = true;
-            });
-            setAcceptedTerms(termsMap);
-          }
-        } catch (parseError) {
-          console.error("Error parsing selected services:", parseError);
+      if (data.success && data.lead) {
+        
+        let savedServices: string[] = [];
+        
+        // Önce Child Table'dan services'i al (yeni sistem)
+        if (data.lead.services && Array.isArray(data.lead.services) && data.lead.services.length > 0) {
+          savedServices = data.lead.services.map((serviceRow: any) => {
+            // service field'ı Link type olduğu için Service DocType'ının name'ini içerir
+            const serviceId = serviceRow.service || serviceRow.service_name || serviceRow.name;
+            return serviceId;
+          }).filter((id: string) => id); // Boş değerleri filtrele
         }
+        
+        // Eğer Child Table'da yoksa, eski JSON field'ından oku (backward compatibility)
+        if (savedServices.length === 0 && data.lead.custom_selected_services) {
+          try {
+            savedServices = JSON.parse(data.lead.custom_selected_services);
+          } catch (parseError) {
+            console.error("Error parsing selected services from JSON:", parseError);
+          }
+        }
+        
+        if (Array.isArray(savedServices) && savedServices.length > 0) {
+          // Direkt set et, services yüklendikten sonra validation yapılacak
+          setSelectedServices(savedServices);
+          // Terms'leri de otomatik kabul et (kullanıcı daha önce kabul etmişti)
+          const termsMap: Record<string, boolean> = {};
+          savedServices.forEach((serviceId: string) => {
+            termsMap[serviceId] = true;
+          });
+          setAcceptedTerms(termsMap);
+        } else {
+            hasServices: !!data.lead.services,
+            servicesLength: data.lead.services?.length || 0,
+            hasCustomSelectedServices: !!data.lead.custom_selected_services,
+            customSelectedServices: data.lead.custom_selected_services
+          });
+        }
+      } else {
       }
     } catch (error) {
       console.error("Error loading selected services:", error);
       // Hata olsa bile devam et
     }
-  }, []);
+  }, []); // services dependency'sini kaldırdık, sonsuz döngüyü önlemek için
 
   const fetchServices = useCallback(async () => {
     try {
       const response = await fetch("/api/erp/get-services");
       const data = await response.json();
 
-      console.log("Services API response:", data);
 
       if (data.success && Array.isArray(data.services)) {
-        console.log("Services loaded:", data.services.length);
         setServices(data.services);
+        return Promise.resolve(); // Services yüklendi
       } else {
         console.error("Services API error:", data.error);
         // Hata mesajını göster
         if (data.error) {
           alert(`Error loading services: ${data.error}`);
         }
+        return Promise.reject(new Error(data.error || "Failed to load services"));
       }
     } catch (error) {
       console.error("Error fetching services:", error);
       alert("Failed to load services. Please check console for details.");
+      return Promise.reject(error);
     } finally {
       setLoading(false);
     }
@@ -127,12 +153,20 @@ export default function ServicesPage() {
       goToStep(2);
     }
 
-    // Load services from ERPNext
-    fetchServices();
-    
-    // Load selected services from Lead if available
-    loadSelectedServices();
-  }, [formData.currentStep, goToStep, fetchServices, loadSelectedServices]);
+    // Load services from ERPNext (sadece bir kez)
+    if (!hasLoadedServices.current) {
+      hasLoadedServices.current = true;
+      fetchServices();
+    }
+  }, [formData.currentStep, goToStep, fetchServices]);
+  
+  // Services yüklendikten sonra selected services'i yükle (sadece bir kez)
+  useEffect(() => {
+    if (services.length > 0 && !hasLoadedSelectedServices.current) {
+      hasLoadedSelectedServices.current = true;
+      loadSelectedServices();
+    }
+  }, [services.length, loadSelectedServices]);
 
   const handleServiceToggle = (serviceId: string) => {
     setSelectedServices((prev) => {
@@ -217,7 +251,6 @@ export default function ServicesPage() {
         return;
       }
 
-      console.log("Services updated successfully:", data.lead);
     } catch (error) {
       console.error("Services update failed:", error);
       alert("Failed to update services. Please try again.");
@@ -277,15 +310,26 @@ export default function ServicesPage() {
                       <h3 className="text-base font-semibold text-gray-800">{service.name}</h3>
                       
                       {/* Service Image */}
-                      {service.image && (
-                        <div className="relative w-full h-48 flex-shrink-0">
-                          <Image
+                      {service.image ? (
+                        <div className="relative w-full h-48 flex-shrink-0 bg-gray-100 rounded-lg overflow-hidden">
+                          <img
                             src={service.image}
                             alt={service.name}
-                            fill
-                            className="object-contain rounded-lg"
-                            unoptimized
+                            className="w-full h-full object-contain rounded-lg"
+                            onError={(e) => {
+                              console.error("Image load error for service:", service.name, "URL:", service.image);
+                              e.currentTarget.style.display = 'none';
+                              // Hata durumunda placeholder göster
+                              const parent = e.currentTarget.parentElement;
+                              if (parent) {
+                                parent.innerHTML = '<div class="w-full h-full flex items-center justify-center"><p class="text-gray-400 text-sm">Image not available</p></div>';
+                              }
+                            }}
                           />
+                        </div>
+                      ) : (
+                        <div className="w-full h-48 flex items-center justify-center bg-gray-100 rounded-lg">
+                          <p className="text-gray-400 text-sm">No image available</p>
                         </div>
                       )}
 
