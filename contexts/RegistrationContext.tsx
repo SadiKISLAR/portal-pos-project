@@ -87,6 +87,17 @@ export function RegistrationProvider({ children }: { children: ReactNode }) {
 
   const loadFromLocalStorage = () => {
     if (typeof window !== "undefined") {
+      // Yeni kullanıcı kaydı başladıysa (initialRegistrationData varsa) 
+      // eski registrationData'yı temizle - form boş başlamalı
+      const initialData = localStorage.getItem("initialRegistrationData");
+      if (initialData) {
+        // Yeni kullanıcı kaydı başlamış, eski verileri temizle
+        localStorage.removeItem("registrationData");
+        setFormData(defaultFormData);
+        return;
+      }
+      
+      // Eski kullanıcı için localStorage'dan yükle
       const saved = localStorage.getItem("registrationData");
       if (saved) {
         try {

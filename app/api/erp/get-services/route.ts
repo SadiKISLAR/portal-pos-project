@@ -33,16 +33,12 @@ export async function GET(req: NextRequest) {
         const fields = encodeURIComponent(JSON.stringify(["*"])); // Tüm field'ları getir
         
         const url = `/api/resource/${encodeURIComponent(doctypeName)}?fields=${fields}`;
-        console.log(`Trying DocType: ${doctypeName} - URL: ${url}`);
         
         servicesResult = await erpGet(url, token);
-        console.log(`Success! Found DocType: ${doctypeName}`);
-        console.log("Services result:", JSON.stringify(servicesResult, null, 2));
         
         foundDocType = doctypeName;
         break; // Başarılı olursa döngüden çık
       } catch (error: any) {
-        console.log(`DocType '${doctypeName}' not found, trying next...`);
         // Bu DocType bulunamadı, bir sonrakini dene
         continue;
       }
@@ -66,13 +62,10 @@ export async function GET(req: NextRequest) {
       services = servicesResult.message;
     }
 
-    console.log("Processed services count:", services.length);
 
     // Her service için image URL'ini base URL ile birleştir
     const baseUrl = process.env.NEXT_PUBLIC_ERP_BASE_URL;
     const processedServices = Array.isArray(services) ? services.map((service: any) => {
-      console.log("Processing service:", service.name);
-      console.log("Service data:", JSON.stringify(service, null, 2));
       
       // Field isimlerini kontrol et - farklı olabilir
       const serviceName = service.service_name || service.name || service.title || "";
@@ -89,11 +82,52 @@ export async function GET(req: NextRequest) {
           if (imageField.startsWith("http")) {
             imageUrl = imageField;
           } else if (imageField.startsWith("/")) {
-            imageUrl = `${baseUrl}${imageField}`;
+            // ERPNext'te image'ler genellikle /files/ veya /private/files/ altında
+            // /private/files/ için authentication gerekir, bu yüzden /files/ kullanıyoruz
+            if (imageField.startsWith("/private/files/")) {
+              // /private/files/ -> /files/ dönüştür (public erişim için)
+              const publicPath = imageField.replace("/private/files/", "/files/");
+              // Path'i parçalara ayır, sadece dosya adını encode et (path separator'ları koru)
+              const pathParts = publicPath.split('/');
+              const encodedParts = pathParts.map((part, index) => {
+                // İlk boş string ve path separator'ları koru, sadece dosya adını encode et
+                if (index === 0 || part === '') return part;
+                // Son kısım (dosya adı) encode edilmeli
+                if (index === pathParts.length - 1) {
+                  return encodeURIComponent(part);
+                }
+                return part;
+              });
+              imageUrl = `${baseUrl}${encodedParts.join('/')}`;
+            } else if (imageField.startsWith("/files/")) {
+              // Zaten /files/ altında, aynı mantıkla encode et
+              const pathParts = imageField.split('/');
+              const encodedParts = pathParts.map((part, index) => {
+                if (index === 0 || part === '') return part;
+                if (index === pathParts.length - 1) {
+                  return encodeURIComponent(part);
+                }
+                return part;
+              });
+              imageUrl = `${baseUrl}${encodedParts.join('/')}`;
+            } else {
+              // Diğer path'ler için de aynı mantık
+              const pathParts = imageField.split('/');
+              const encodedParts = pathParts.map((part, index) => {
+                if (index === 0 || part === '') return part;
+                if (index === pathParts.length - 1) {
+                  return encodeURIComponent(part);
+                }
+                return part;
+              });
+              imageUrl = `${baseUrl}${encodedParts.join('/')}`;
+            }
           } else {
-            imageUrl = `${baseUrl}/${imageField}`;
+            // URL'deki boşlukları ve özel karakterleri encode et
+            imageUrl = `${baseUrl}/${encodeURI(imageField)}`;
           }
         }
+      } else {
       }
 
       return {
@@ -106,7 +140,6 @@ export async function GET(req: NextRequest) {
       };
     }) : [];
 
-    console.log("Final processed services:", processedServices.length);
 
     return NextResponse.json({
       success: true,

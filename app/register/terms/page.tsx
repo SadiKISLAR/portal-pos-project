@@ -52,7 +52,6 @@ function RegisterTermsContent() {
     }
 
     // Handle final registration
-    console.log("Final registration:", { ...formData, confirmPassword });
     // Navigate to success page or login
     router.push("/");
   };

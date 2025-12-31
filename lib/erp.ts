@@ -46,16 +46,21 @@ export async function erpLogin(email: string, password: string) {
 
 export async function erpGet(path: string, token?: string) {
   const headers: HeadersInit = {
-    'Content-Type': 'application/json',
+    'Accept': 'application/json',
   };
   
+  // GET isteklerinde Content-Type gerekmez, bu 417 hatasına neden olabilir
+  // Sadece Authorization header'ı ekle
   if (token) {
     headers['Authorization'] = `token ${token}`;
   }
   
   const res = await fetch(`${BASE}${path}`, {
+    method: 'GET',
     headers,
     cache: 'no-store',
+    // Expect header'ını kaldırmak için redirect ve credentials ayarları
+    redirect: 'follow',
   });
   return handle(res);
 }

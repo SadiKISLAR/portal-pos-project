@@ -211,7 +211,6 @@ export default function PaymentInformationPage() {
         },
       };
 
-      console.log("Sending payment info to API:", requestBody);
 
       const res = await fetch("/api/erp/update-lead", {
         method: "POST",
@@ -222,7 +221,6 @@ export default function PaymentInformationPage() {
       });
 
       const data = await res.json();
-      console.log("API Response:", data);
 
       if (!res.ok || !data.success) {
         console.error("API Error:", data);
@@ -230,7 +228,6 @@ export default function PaymentInformationPage() {
         return;
       }
 
-      console.log("Payment information updated successfully:", data.lead);
     } catch (error) {
       console.error("Payment information update failed:", error);
       alert("Failed to update payment information. Please try again.");

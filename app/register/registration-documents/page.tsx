@@ -14,20 +14,122 @@ interface FileWithPreview extends File {
   preview?: string;
 }
 
+interface CompanyType {
+  id: string;
+  name: string;
+  description: string;
+  isActive: boolean;
+}
+
+interface RequiredDocument {
+  id: string;
+  documentName: string;
+  documentType: string;
+  isRequired: boolean;
+  maxFiles: number;
+  allowedFileTypes: string;
+  isDateField: boolean;
+  dateFieldLabel: string;
+}
+
+interface DocumentData {
+  files?: FileWithPreview[];
+  date?: string;
+}
+
 export default function RegistrationDocumentsPage() {
   const router = useRouter();
   const { formData, updateFormData, goToStep } = useRegistration();
-  const [companyType, setCompanyType] = useState("");
-  const [businessRegistrationFiles, setBusinessRegistrationFiles] = useState<FileWithPreview[]>([]);
-  const [idFiles, setIdFiles] = useState<FileWithPreview[]>([]);
-  const [shareholdersFiles, setShareholdersFiles] = useState<FileWithPreview[]>([]);
+  const [companyTypes, setCompanyTypes] = useState<CompanyType[]>([]);
+  const [selectedCompanyType, setSelectedCompanyType] = useState("");
+  const [requiredDocuments, setRequiredDocuments] = useState<RequiredDocument[]>([]);
+  const [documentData, setDocumentData] = useState<Record<string, DocumentData>>({});
+  const [loadingCompanyTypes, setLoadingCompanyTypes] = useState(false);
+  const [loadingDocuments, setLoadingDocuments] = useState(false);
+  const [error, setError] = useState("");
 
-  const businessRegistrationInputRef = useRef<HTMLInputElement>(null);
-  const idInputRef = useRef<HTMLInputElement>(null);
-  const shareholdersInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const hasLoadedCompanyTypes = useRef(false);
 
+  // Company type'ları ERPNext'ten çek
+  const fetchCompanyTypes = useCallback(async () => {
+    if (hasLoadedCompanyTypes.current) return;
+    
+    setLoadingCompanyTypes(true);
+    setError("");
+    
+    try {
+      const res = await fetch("/api/erp/get-company-types");
+      const data = await res.json();
+
+      if (data.success && data.companyTypes) {
+        setCompanyTypes(data.companyTypes);
+        hasLoadedCompanyTypes.current = true;
+      } else {
+        setError(data.error || "Failed to load company types");
+      }
+    } catch (error: any) {
+      console.error("Error fetching company types:", error);
+      setError("Failed to load company types. Please try again.");
+    } finally {
+      setLoadingCompanyTypes(false);
+    }
+  }, []);
+
+  // Seçilen company type için gerekli belgeleri çek
+  const fetchRequiredDocuments = useCallback(async (companyTypeName: string) => {
+    if (!companyTypeName) {
+      setRequiredDocuments([]);
+      setDocumentData({});
+      return;
+    }
+
+    setLoadingDocuments(true);
+    setError("");
+
+    try {
+      const res = await fetch(`/api/erp/get-required-documents?companyType=${encodeURIComponent(companyTypeName)}`);
+      const data = await res.json();
+
+      if (data.success && data.requiredDocuments) {
+        setRequiredDocuments(data.requiredDocuments);
+        
+        // Her belge için boş state oluştur
+        const initialDocumentData: Record<string, DocumentData> = {};
+        data.requiredDocuments.forEach((doc: RequiredDocument) => {
+          if (doc.isDateField) {
+            initialDocumentData[doc.id] = { date: "" };
+          } else {
+            initialDocumentData[doc.id] = { files: [] };
+          }
+        });
+        setDocumentData(initialDocumentData);
+        
+      } else {
+        setError(data.error || "Failed to load required documents");
+        setRequiredDocuments([]);
+      }
+    } catch (error: any) {
+      console.error("Error fetching required documents:", error);
+      setError("Failed to load required documents. Please try again.");
+      setRequiredDocuments([]);
+    } finally {
+      setLoadingDocuments(false);
+    }
+  }, []);
+
+  // Company type değiştiğinde belgeleri çek
+  useEffect(() => {
+    if (selectedCompanyType) {
+      fetchRequiredDocuments(selectedCompanyType);
+    } else {
+      setRequiredDocuments([]);
+      setDocumentData({});
+    }
+  }, [selectedCompanyType, fetchRequiredDocuments]);
+
+  // Mevcut Lead'den company type'ı yükle
   const loadDocumentsInfo = useCallback(async () => {
-    // Get user email
     let userEmail = "";
     if (typeof window !== "undefined") {
       const sessionEmail = sessionStorage.getItem("userEmail");
@@ -47,7 +149,7 @@ export default function RegistrationDocumentsPage() {
     }
 
     if (!userEmail) {
-      return; // Email yoksa Lead'den veri çekemeyiz
+      return;
     }
 
     try {
@@ -66,42 +168,29 @@ export default function RegistrationDocumentsPage() {
         
         // Type of Company
         if (lead.custom_type_of_company) {
-          setCompanyType(lead.custom_type_of_company);
+          setSelectedCompanyType(lead.custom_type_of_company);
         }
-
-        // File arrays (JSON string'lerden parse et)
-        if (lead.businessRegistrationFiles && Array.isArray(lead.businessRegistrationFiles) && lead.businessRegistrationFiles.length > 0) {
-          // File URL'lerini File objelerine çeviremeyiz, ama en azından state'i güncelleyebiliriz
-          // Şimdilik sadece type of company'yi yükleyelim, file'lar için ayrı bir çözüm gerekebilir
-        }
-        if (lead.idFiles && Array.isArray(lead.idFiles) && lead.idFiles.length > 0) {
-          // Aynı şekilde
-        }
-        if (lead.shareholdersFiles && Array.isArray(lead.shareholdersFiles) && lead.shareholdersFiles.length > 0) {
-          // Aynı şekilde
-        }
-        // Not: File'ları geri yüklemek için URL'lerden File objesi oluşturmak gerekir, bu daha karmaşık
-        // Şimdilik sadece type of company'yi yükleyelim
       }
     } catch (error) {
       console.error("Error loading documents info:", error);
-      // Hata olsa bile devam et
     }
   }, []);
 
   useEffect(() => {
-    // Ensure we're on step 4
     if (formData.currentStep !== 4) {
       goToStep(4);
     }
 
-    // Load documents information from Lead if available
+    // Company type'ları yükle
+    fetchCompanyTypes();
+    
+    // Mevcut Lead'den bilgileri yükle
     loadDocumentsInfo();
-  }, [formData.currentStep, goToStep, loadDocumentsInfo]);
+  }, [formData.currentStep, goToStep, fetchCompanyTypes, loadDocumentsInfo]);
 
   const handleFileSelect = (
     files: FileList | null,
-    setFiles: React.Dispatch<React.SetStateAction<FileWithPreview[]>>,
+    documentId: string,
     maxFiles: number = 5
   ) => {
     if (!files) return;
@@ -113,9 +202,16 @@ export default function RegistrationDocumentsPage() {
       return isValidSize && isValidFormat;
     });
 
-    setFiles((prev) => {
-      const combined = [...prev, ...validFiles];
-      return combined.slice(0, maxFiles);
+    setDocumentData((prev) => {
+      const currentFiles = prev[documentId]?.files || [];
+      const combined = [...currentFiles, ...validFiles];
+      return {
+        ...prev,
+        [documentId]: {
+          ...prev[documentId],
+          files: combined.slice(0, maxFiles),
+        },
+      };
     });
   };
 
@@ -126,23 +222,39 @@ export default function RegistrationDocumentsPage() {
 
   const handleDrop = (
     e: React.DragEvent,
-    setFiles: React.Dispatch<React.SetStateAction<FileWithPreview[]>>,
+    documentId: string,
     maxFiles: number = 5
   ) => {
     e.preventDefault();
     e.stopPropagation();
-    handleFileSelect(e.dataTransfer.files, setFiles, maxFiles);
+    handleFileSelect(e.dataTransfer.files, documentId, maxFiles);
   };
 
-  const handleFileInputClick = (inputRef: React.RefObject<HTMLInputElement>) => {
-    inputRef.current?.click();
+  const handleFileInputClick = (documentId: string) => {
+    fileInputRefs.current[documentId]?.click();
   };
 
-  const removeFile = (
-    index: number,
-    setFiles: React.Dispatch<React.SetStateAction<FileWithPreview[]>>
-  ) => {
-    setFiles((prev) => prev.filter((_, i) => i !== index));
+  const removeFile = (documentId: string, index: number) => {
+    setDocumentData((prev) => {
+      const currentFiles = prev[documentId]?.files || [];
+      return {
+        ...prev,
+        [documentId]: {
+          ...prev[documentId],
+          files: currentFiles.filter((_, i) => i !== index),
+        },
+      };
+    });
+  };
+
+  const handleDateChange = (documentId: string, date: string) => {
+    setDocumentData((prev) => ({
+      ...prev,
+      [documentId]: {
+        ...prev[documentId],
+        date: date,
+      },
+    }));
   };
 
   const handleBack = () => {
@@ -150,17 +262,98 @@ export default function RegistrationDocumentsPage() {
     router.push("/register/payment-information");
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     // Validation
-    if (!companyType || businessRegistrationFiles.length === 0 || idFiles.length === 0 || shareholdersFiles.length === 0) {
-      alert("Please fill in all required fields and upload all required documents");
+    if (!selectedCompanyType) {
+      alert("Please select a company type");
       return;
     }
 
-    // TODO: Upload files to server
-    // TODO: Save data and complete registration
-    alert("Registration completed successfully!");
-    router.push("/");
+    // Her required document için validation
+    for (const doc of requiredDocuments) {
+      if (doc.isRequired) {
+        if (doc.isDateField) {
+          if (!documentData[doc.id]?.date) {
+            alert(`Please fill in ${doc.documentName}`);
+            return;
+          }
+        } else {
+          if (!documentData[doc.id]?.files || documentData[doc.id].files!.length === 0) {
+            alert(`Please upload ${doc.documentName}`);
+            return;
+          }
+        }
+      }
+    }
+
+    // TODO: Upload files to server and save to Lead
+    // Şimdilik sadece console'a yazdır
+
+    // Update Lead with documents
+    let userEmail = "";
+    if (typeof window !== "undefined") {
+      const sessionEmail = sessionStorage.getItem("userEmail");
+      if (sessionEmail) {
+        userEmail = sessionEmail;
+      } else {
+        const initialData = localStorage.getItem("initialRegistrationData");
+        if (initialData) {
+          try {
+            const parsed = JSON.parse(initialData);
+            userEmail = parsed.email || "";
+          } catch (error) {
+            console.error("Error parsing initial data:", error);
+          }
+        }
+      }
+    }
+
+    if (!userEmail) {
+      alert("User email not found. Please login again.");
+      return;
+    }
+
+    try {
+      // File'ları FormData ile göndermek için hazırla
+      const formDataToSend = new FormData();
+      formDataToSend.append("email", userEmail);
+      formDataToSend.append("documents", JSON.stringify({
+        typeOfCompany: selectedCompanyType,
+        documentData: documentData,
+        isCompleted: true, // Tüm belgeler yüklendi
+      }));
+
+      // Her belge için file'ları ekle
+      Object.keys(documentData).forEach((docId) => {
+        const doc = documentData[docId];
+        if (doc.files && doc.files.length > 0) {
+          doc.files.forEach((file, index) => {
+            formDataToSend.append(`document_${docId}_${index}`, file);
+          });
+        }
+        if (doc.date) {
+          formDataToSend.append(`document_${docId}_date`, doc.date);
+        }
+      });
+
+      const res = await fetch("/api/erp/update-lead", {
+        method: "POST",
+        body: formDataToSend,
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        // Registration tamamlandı, dashboard'a yönlendir
+        alert("Registration completed successfully!");
+        router.push("/dashboard");
+      } else {
+        alert(data.error || "Failed to save documents");
+      }
+    } catch (error: any) {
+      console.error("Error submitting documents:", error);
+      alert("Failed to submit documents. Please try again.");
+    }
   };
 
   return (
@@ -179,6 +372,12 @@ export default function RegistrationDocumentsPage() {
               </p>
             </div>
 
+            {error && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+                {error}
+              </div>
+            )}
+
             <form className="space-y-8" onSubmit={(e) => e.preventDefault()}>
               {/* Type of Company */}
               <div className="space-y-2">
@@ -187,268 +386,153 @@ export default function RegistrationDocumentsPage() {
                 </Label>
                 <select
                   id="companyType"
-                  value={companyType}
-                  onChange={(e) => setCompanyType(e.target.value)}
-                  className="w-full h-10 px-3 rounded-md border border-gray-300 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                  value={selectedCompanyType}
+                  onChange={(e) => setSelectedCompanyType(e.target.value)}
+                  disabled={loadingCompanyTypes}
+                  className="w-full h-10 px-3 rounded-md border border-gray-300 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-green-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
                 >
-                  <option value="">Select</option>
-                  <option value="LLC">LLC</option>
-                  <option value="Corporation">Corporation</option>
-                  <option value="Partnership">Partnership</option>
-                  <option value="Sole Proprietorship">Sole Proprietorship</option>
+                  <option value="">
+                    {loadingCompanyTypes ? "Loading..." : "Select"}
+                  </option>
+                  {companyTypes.map((ct) => (
+                    <option key={ct.id} value={ct.name}>
+                      {ct.name}
+                    </option>
+                  ))}
                 </select>
-              </div>
-
-              {/* Business Registration */}
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label className="text-sm font-semibold text-gray-700">
-                    Business Registration <span className="text-red-500">*</span>
-                  </Label>
-                  <p
-                    style={{
-                      fontFamily: 'SF Pro Text',
-                      fontWeight: 'normal',
-                      fontSize: '13px',
-                      lineHeight: '15px',
-                      color: '#d4d8de',
-                      letterSpacing: '0',
-                    }}
-                  >
-                    If your business registration consists of multiple pages, you can upload them as
-                    individual files - up to 5 files are possible.
+                {selectedCompanyType && companyTypes.find((ct) => ct.name === selectedCompanyType)?.description && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    {companyTypes.find((ct) => ct.name === selectedCompanyType)?.description}
                   </p>
-                </div>
-
-                <div
-                  className="border-2 border-dashed border-green-500 rounded-lg text-center cursor-pointer hover:bg-green-50 transition-colors flex flex-col items-center justify-center"
-                  style={{
-                    width: '641px',
-                    height: '153px',
-                  }}
-                  onDragOver={handleDragOver}
-                  onDrop={(e) => handleDrop(e, setBusinessRegistrationFiles, 5)}
-                  onClick={() => handleFileInputClick(businessRegistrationInputRef)}
-                >
-                  <p className="text-sm text-gray-600 mb-2">Drag and drop files here</p>
-                  <p className="text-sm text-gray-600 mb-4">or</p>
-                  <div className="flex flex-col items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="default"
-                      className="text-white hover:opacity-90"
-                      style={{
-                        backgroundColor: '#111827',
-                        borderRadius: '10px',
-                        width: '63px',
-                        height: '24px',
-                        fontSize: '14px',
-                        padding: '0',
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleFileInputClick(businessRegistrationInputRef);
-                      }}
-                    >
-                      Upload
-                    </Button>
-                    <p className="text-xs" style={{ color: '#F4A023' }}>
-                      Maximum file size: 5MB. Accepted formats: PDF, JPG, PNG.
-                    </p>
-                  </div>
-                  <input
-                    ref={businessRegistrationInputRef}
-                    type="file"
-                    multiple
-                    accept=".pdf,.jpg,.jpeg,.png"
-                    className="hidden"
-                    onChange={(e) => handleFileSelect(e.target.files, setBusinessRegistrationFiles, 5)}
-                  />
-                </div>
-
-                {businessRegistrationFiles.length > 0 && (
-                  <div className="space-y-2">
-                    {businessRegistrationFiles.map((file, index) => (
-                      <div
-                        key={index}
-                        className="flex items-center justify-between p-2 bg-gray-50 rounded border"
-                      >
-                        <span className="text-sm text-gray-700 truncate flex-1">{file.name}</span>
-                        <button
-                          type="button"
-                          onClick={() => removeFile(index, setBusinessRegistrationFiles)}
-                          className="text-red-500 hover:text-red-700 text-sm ml-2"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ))}
-                  </div>
                 )}
               </div>
 
-              {/* ID */}
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label className="text-sm font-semibold text-gray-700">
-                    ID <span className="text-red-500">*</span>
-                  </Label>
-                  <p
-                    style={{
-                      fontFamily: 'SF Pro Text',
-                      fontWeight: 'normal',
-                      fontSize: '13px',
-                      lineHeight: '15px',
-                      color: '#d4d8de',
-                      letterSpacing: '0',
-                    }}
-                  >
-                    You can upload multiple files. If your ID card does not contain both the front
-                    and back in one file, please upload both sides separately.
-                  </p>
+              {/* Required Documents */}
+              {loadingDocuments && (
+                <div className="text-center py-4 text-gray-600">
+                  Loading required documents...
                 </div>
+              )}
 
-                <div
-                  className="border-2 border-dashed border-green-500 rounded-lg text-center cursor-pointer hover:bg-green-50 transition-colors flex flex-col items-center justify-center"
-                  style={{
-                    width: '641px',
-                    height: '153px',
-                  }}
-                  onDragOver={handleDragOver}
-                  onDrop={(e) => handleDrop(e, setIdFiles, 5)}
-                  onClick={() => handleFileInputClick(idInputRef)}
-                >
-                  <p className="text-sm text-gray-600 mb-2">Drag and drop files here</p>
-                  <p className="text-sm text-gray-600 mb-4">or</p>
-                  <div className="flex flex-col items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="default"
-                      className="text-white hover:opacity-90"
-                      style={{
-                        backgroundColor: '#111827',
-                        borderRadius: '10px',
-                        width: '63px',
-                        height: '24px',
-                        fontSize: '14px',
-                        padding: '0',
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleFileInputClick(idInputRef);
-                      }}
-                    >
-                      Upload
-                    </Button>
-                    <p className="text-xs" style={{ color: '#F4A023' }}>
-                      Maximum file size: 5MB. Accepted formats: PDF, JPG, PNG.
-                    </p>
-                  </div>
-                  <input
-                    ref={idInputRef}
-                    type="file"
-                    multiple
-                    accept=".pdf,.jpg,.jpeg,.png"
-                    className="hidden"
-                    onChange={(e) => handleFileSelect(e.target.files, setIdFiles, 5)}
-                  />
-                </div>
+              {!loadingDocuments && requiredDocuments.length > 0 && (
+                <div className="space-y-8">
+                  {requiredDocuments.map((doc) => (
+                    <div key={doc.id} className="space-y-4">
+                      <div className="space-y-2">
+                        <Label className="text-sm font-semibold text-gray-700">
+                          {doc.documentName} {doc.isRequired && <span className="text-red-500">*</span>}
+                        </Label>
+                        {doc.isDateField ? (
+                          // Date Field
+                          <div className="space-y-2">
+                            <Input
+                              type="date"
+                              value={documentData[doc.id]?.date || ""}
+                              onChange={(e) => handleDateChange(doc.id, e.target.value)}
+                              className="w-full h-10 px-3 rounded-md border border-gray-300 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                              required={doc.isRequired}
+                            />
+                            <p className="text-xs text-gray-500">
+                              {doc.dateFieldLabel}
+                            </p>
+                          </div>
+                        ) : (
+                          // File Upload Field
+                          <>
+                            <p
+                              style={{
+                                fontFamily: 'SF Pro Text',
+                                fontWeight: 'normal',
+                                fontSize: '13px',
+                                lineHeight: '15px',
+                                color: '#d4d8de',
+                                letterSpacing: '0',
+                              }}
+                            >
+                              You can upload multiple files - up to {doc.maxFiles} files are possible.
+                              Allowed formats: {doc.allowedFileTypes}
+                            </p>
 
-                {idFiles.length > 0 && (
-                  <div className="space-y-2">
-                    {idFiles.map((file, index) => (
-                      <div
-                        key={index}
-                        className="flex items-center justify-between p-2 bg-gray-50 rounded border"
-                      >
-                        <span className="text-sm text-gray-700 truncate flex-1">{file.name}</span>
-                        <button
-                          type="button"
-                          onClick={() => removeFile(index, setIdFiles)}
-                          className="text-red-500 hover:text-red-700 text-sm ml-2"
-                        >
-                          Remove
-                        </button>
+                            <div
+                              className="border-2 border-dashed border-green-500 rounded-lg text-center cursor-pointer hover:bg-green-50 transition-colors flex flex-col items-center justify-center"
+                              style={{
+                                width: '641px',
+                                height: '153px',
+                              }}
+                              onDragOver={handleDragOver}
+                              onDrop={(e) => handleDrop(e, doc.id, doc.maxFiles)}
+                              onClick={() => handleFileInputClick(doc.id)}
+                            >
+                              <p className="text-sm text-gray-600 mb-2">Drag and drop files here</p>
+                              <p className="text-sm text-gray-600 mb-4">or</p>
+                              <div className="flex flex-col items-center gap-2">
+                                <Button
+                                  type="button"
+                                  variant="default"
+                                  className="text-white hover:opacity-90"
+                                  style={{
+                                    backgroundColor: '#111827',
+                                    borderRadius: '10px',
+                                    width: '63px',
+                                    height: '24px',
+                                    fontSize: '14px',
+                                    padding: '0',
+                                  }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleFileInputClick(doc.id);
+                                  }}
+                                >
+                                  Upload
+                                </Button>
+                                <p className="text-xs" style={{ color: '#F4A023' }}>
+                                  Maximum file size: 5MB. Accepted formats: {doc.allowedFileTypes}.
+                                </p>
+                              </div>
+                              <input
+                                ref={(el) => {
+                                  fileInputRefs.current[doc.id] = el;
+                                }}
+                                type="file"
+                                multiple
+                                accept=".pdf,.jpg,.jpeg,.png"
+                                className="hidden"
+                                onChange={(e) => handleFileSelect(e.target.files, doc.id, doc.maxFiles)}
+                              />
+                            </div>
+
+                            {documentData[doc.id]?.files && documentData[doc.id].files!.length > 0 && (
+                              <div className="space-y-2">
+                                {documentData[doc.id].files!.map((file, index) => (
+                                  <div
+                                    key={index}
+                                    className="flex items-center justify-between p-2 bg-gray-50 rounded border"
+                                  >
+                                    <span className="text-sm text-gray-700 truncate flex-1">{file.name}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => removeFile(doc.id, index)}
+                                      className="text-red-500 hover:text-red-700 text-sm ml-2"
+                                    >
+                                      Remove
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </>
+                        )}
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* List of Shareholders */}
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label className="text-sm font-semibold text-gray-700">
-                    List of Shareholders <span className="text-red-500">*</span>
-                  </Label>
+                    </div>
+                  ))}
                 </div>
+              )}
 
-                <div
-                  className="border-2 border-dashed border-green-500 rounded-lg text-center cursor-pointer hover:bg-green-50 transition-colors flex flex-col items-center justify-center"
-                  style={{
-                    width: '641px',
-                    height: '153px',
-                  }}
-                  onDragOver={handleDragOver}
-                  onDrop={(e) => handleDrop(e, setShareholdersFiles, 5)}
-                  onClick={() => handleFileInputClick(shareholdersInputRef)}
-                >
-                  <p className="text-sm text-gray-600 mb-2">Drag and drop files here</p>
-                  <p className="text-sm text-gray-600 mb-4">or</p>
-                  <div className="flex flex-col items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="default"
-                      className="text-white hover:opacity-90"
-                      style={{
-                        backgroundColor: '#111827',
-                        borderRadius: '10px',
-                        width: '63px',
-                        height: '24px',
-                        fontSize: '14px',
-                        padding: '0',
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleFileInputClick(shareholdersInputRef);
-                      }}
-                    >
-                      Upload
-                    </Button>
-                    <p className="text-xs" style={{ color: '#F4A023' }}>
-                      Maximum file size: 5MB. Accepted formats: PDF, JPG, PNG.
-                    </p>
-                  </div>
-                  <input
-                    ref={shareholdersInputRef}
-                    type="file"
-                    multiple
-                    accept=".pdf,.jpg,.jpeg,.png"
-                    className="hidden"
-                    onChange={(e) => handleFileSelect(e.target.files, setShareholdersFiles, 5)}
-                  />
+              {!loadingDocuments && selectedCompanyType && requiredDocuments.length === 0 && (
+                <div className="text-center py-4 text-gray-600">
+                  No required documents found for this company type.
                 </div>
-
-                {shareholdersFiles.length > 0 && (
-                  <div className="space-y-2">
-                    {shareholdersFiles.map((file, index) => (
-                      <div
-                        key={index}
-                        className="flex items-center justify-between p-2 bg-gray-50 rounded border"
-                      >
-                        <span className="text-sm text-gray-700 truncate flex-1">{file.name}</span>
-                        <button
-                          type="button"
-                          onClick={() => removeFile(index, setShareholdersFiles)}
-                          className="text-red-500 hover:text-red-700 text-sm ml-2"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+              )}
 
               {/* Navigation Buttons */}
               <div className="flex justify-center gap-4 pt-6 border-t">
@@ -461,7 +545,7 @@ export default function RegistrationDocumentsPage() {
                 >
                   Back
                 </Button>
-                <RegisterButton type="button" onClick={handleSubmit}>
+                <RegisterButton type="button" onClick={handleSubmit} disabled={!selectedCompanyType || requiredDocuments.length === 0}>
                   Submit
                 </RegisterButton>
               </div>

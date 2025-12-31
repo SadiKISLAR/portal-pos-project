@@ -37,7 +37,15 @@ export async function POST(req: NextRequest) {
     // Lead'de email_id veya lead_name ile user'ı eşleştirebiliriz
     try {
       const filters = encodeURIComponent(JSON.stringify([["email_id", "=", email]]));
-      const fields = encodeURIComponent(JSON.stringify(["name", "email_id", "company_name"]));
+      const fields = encodeURIComponent(JSON.stringify([
+        "name", 
+        "email_id", 
+        "company_name",
+        "custom_registration_status",
+        "custom_selected_services",
+        "custom_account_holder",
+        "custom_type_of_company"
+      ]));
       
       const leadsResult = await erpGet(
         `/api/resource/Lead?filters=${filters}&fields=${fields}`,
@@ -48,13 +56,21 @@ export async function POST(req: NextRequest) {
 
       // Eğer en az bir Lead varsa, kullanıcı company information'ı doldurmuş demektir
       if (Array.isArray(leads) && leads.length > 0) {
+        const lead = leads[0];
+        const registrationStatus = lead.custom_registration_status || "Incomplete";
+        const isRegistrationCompleted = registrationStatus === "Completed";
+        
         return NextResponse.json({
           hasLead: true,
-          lead: leads[0],
+          lead: lead,
+          isRegistrationCompleted: isRegistrationCompleted,
+          registrationStatus: registrationStatus,
         });
       } else {
         return NextResponse.json({
           hasLead: false,
+          isRegistrationCompleted: false,
+          registrationStatus: "No Lead",
         });
       }
     } catch (e: any) {
