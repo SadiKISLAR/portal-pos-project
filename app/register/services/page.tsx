@@ -106,14 +106,7 @@ export default function ServicesPage() {
             termsMap[serviceId] = true;
           });
           setAcceptedTerms(termsMap);
-        } else {
-            hasServices: !!data.lead.services,
-            servicesLength: data.lead.services?.length || 0,
-            hasCustomSelectedServices: !!data.lead.custom_selected_services,
-            customSelectedServices: data.lead.custom_selected_services
-          });
         }
-      } else {
       }
     } catch (error) {
       console.error("Error loading selected services:", error);

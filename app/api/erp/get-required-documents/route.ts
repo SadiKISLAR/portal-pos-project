@@ -157,15 +157,6 @@ export async function GET(req: NextRequest) {
                            (doc.is_date_field !== undefined ? doc.is_date_field : false);
         const dateFieldLabel = doc.custom_date_field_label || doc.date_field_label || doc.custom_document_name || doc.document_name || "";
         
-          documentName,
-          documentType,
-          isRequired,
-          maxFiles,
-          allowedFileTypes,
-          isDateField,
-          dateFieldLabel
-        });
-        
         return {
           id: doc.name || documentName || `doc_${index}`,
           documentName: documentName,
@@ -177,7 +168,6 @@ export async function GET(req: NextRequest) {
           dateFieldLabel: dateFieldLabel,
         };
       });
-    } else {
     }
 
 

@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
       }
 
       // Collect uploaded files
-      for (const [key, value] of formData.entries()) {
+      for (const [key, value] of Array.from(formData.entries())) {
         if (value instanceof File) {
           const match = key.match(/^document_(.+)_(\d+)$/);
           if (match) {
@@ -248,7 +248,10 @@ export async function POST(req: NextRequest) {
         const streetParts: string[] = [];
         if (companyInfo.city) streetParts.push(companyInfo.city);
         if (companyInfo.zipCode) streetParts.push(companyInfo.zipCode);
-        if (companyInfo.country) streetParts.push(normalizeCountry(companyInfo.country));
+        if (companyInfo.country) {
+          const normalizedCountry = normalizeCountry(companyInfo.country);
+          if (normalizedCountry) streetParts.push(normalizedCountry);
+        }
         streetForAddress = streetParts.join(" ").trim();
       }
 

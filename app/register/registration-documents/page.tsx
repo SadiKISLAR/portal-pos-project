@@ -336,10 +336,6 @@ export default function RegistrationDocumentsPage() {
         }
       });
 
-        typeOfCompany: selectedCompanyType,
-        documentData: documentData,
-      });
-
       const res = await fetch("/api/erp/update-lead", {
         method: "POST",
         body: formDataToSend,

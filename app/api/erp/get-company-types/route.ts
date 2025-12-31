@@ -90,14 +90,6 @@ export async function GET(req: NextRequest) {
       const isActive = ct.custom_is_active !== undefined ? ct.custom_is_active : 
                       (ct.is_active !== undefined ? ct.is_active : true);
       
-        custom_company_type_name: ct.custom_company_type_name,
-        company_type_name: ct.company_type_name,
-        custom_description: ct.custom_description,
-        description: ct.description,
-        custom_is_active: ct.custom_is_active,
-        is_active: ct.is_active,
-      });
-      
       return {
         id: ct.name,
         name: companyTypeName,
