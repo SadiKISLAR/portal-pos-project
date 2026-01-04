@@ -454,11 +454,7 @@ export default function RegistrationDocumentsPage() {
                             </p>
 
                             <div
-                              className="border-2 border-dashed border-green-500 rounded-lg text-center cursor-pointer hover:bg-green-50 transition-colors flex flex-col items-center justify-center"
-                              style={{
-                                width: '641px',
-                                height: '153px',
-                              }}
+                              className="w-full max-w-2xl border-2 border-dashed border-green-500 rounded-lg text-center cursor-pointer hover:bg-green-50 transition-colors flex flex-col items-center justify-center py-8 px-4 min-h-[153px]"
                               onDragOver={handleDragOver}
                               onDrop={(e) => handleDrop(e, doc.id, doc.maxFiles)}
                               onClick={() => handleFileInputClick(doc.id)}
