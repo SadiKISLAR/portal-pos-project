@@ -174,6 +174,7 @@ export async function POST(req: NextRequest) {
 
       // Parse services from Child Table
       let selectedServices = [];
+      let selectedServiceNames: string[] = [];
       try {
         // Önce Child Table'dan services'i al (eğer varsa)
         if (lead.services && Array.isArray(lead.services) && lead.services.length > 0) {
@@ -187,6 +188,29 @@ export async function POST(req: NextRequest) {
         // Eğer Child Table'da yoksa, eski JSON field'ından oku (backward compatibility)
         if (selectedServices.length === 0 && lead.custom_selected_services) {
           selectedServices = JSON.parse(lead.custom_selected_services);
+        }
+        
+        // Service ID'lerinden service name'lerini al
+        if (selectedServices.length > 0) {
+          try {
+            const serviceFilters = encodeURIComponent(JSON.stringify([
+              ["name", "in", selectedServices]
+            ]));
+            const serviceFields = encodeURIComponent(JSON.stringify(["name", "service_name"]));
+            const servicesUrl = `/api/resource/Service?filters=${serviceFilters}&fields=${serviceFields}`;
+            
+            const servicesResult = await erpGet(servicesUrl, token);
+            const services = servicesResult?.data || (Array.isArray(servicesResult) ? servicesResult : []);
+            
+            if (Array.isArray(services) && services.length > 0) {
+              selectedServiceNames = services.map((svc: any) => {
+                return svc.service_name || svc.name || "";
+              }).filter((name: string) => name);
+            }
+          } catch (serviceNameError: any) {
+            console.warn("Error fetching service names:", serviceNameError);
+            // Service name'leri alınamazsa devam et
+          }
         }
       } catch (e) {
         console.warn("Error parsing selected services:", e);
@@ -275,6 +299,7 @@ export async function POST(req: NextRequest) {
           businesses, // Parse edilmiş businesses array
           custom_selected_services: selectedServices.length > 0 ? JSON.stringify(selectedServices) : lead.custom_selected_services, // Services array (backward compatibility için JSON)
           services: lead.services || [], // Child Table services (eğer varsa)
+          selected_service_names: selectedServiceNames.length > 0 ? selectedServiceNames.join(", ") : "", // Service name'leri (görüntüleme için)
         },
       });
     } else {

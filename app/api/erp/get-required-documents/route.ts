@@ -5,6 +5,9 @@ import { erpGet } from "@/lib/erp";
  * Bu API endpoint'i seçilen company type için gerekli belgeleri getirir.
  * Registration Documents sayfasında dinamik belge alanları oluşturmak için kullanılacak.
  */
+// Force dynamic rendering - bu route her zaman dynamic olmalı
+export const dynamic = 'force-dynamic';
+
 export async function GET(req: NextRequest) {
   try {
     const token = process.env.ERP_API_TOKEN;
@@ -44,33 +47,16 @@ export async function GET(req: NextRequest) {
     // Her DocType adını dene
     for (const doctypeName of possibleDocTypeNames) {
       try {
-        // Önce company type'ı custom_company_type_name veya company_type_name ile bul
-        const filtersByName = encodeURIComponent(JSON.stringify([
-          ["custom_company_type_name", "=", companyTypeName]
-        ]));
         const fields = encodeURIComponent(JSON.stringify(["*"]));
-        
-        let url = `/api/resource/${encodeURIComponent(doctypeName)}?filters=${filtersByName}&fields=${fields}`;
-        
-        let result = await erpGet(url, token);
-        
         let companyTypes = [];
-        if (result?.data && Array.isArray(result.data)) {
-          companyTypes = result.data;
-        } else if (Array.isArray(result)) {
-          companyTypes = result;
-        } else if (result?.message && Array.isArray(result.message)) {
-          companyTypes = result.message;
-        }
-
-        // Eğer custom_company_type_name ile bulunamazsa, company_type_name ile dene
-        if (companyTypes.length === 0) {
-          const filtersByName2 = encodeURIComponent(JSON.stringify([
-            ["company_type_name", "=", companyTypeName]
+        
+        // Önce name (ID) ile dene - frontend'den gelen değer ID olabilir
+        try {
+          const filtersById = encodeURIComponent(JSON.stringify([
+            ["name", "=", companyTypeName]
           ]));
-          url = `/api/resource/${encodeURIComponent(doctypeName)}?filters=${filtersByName2}&fields=${fields}`;
-          
-          result = await erpGet(url, token);
+          let url = `/api/resource/${encodeURIComponent(doctypeName)}?filters=${filtersById}&fields=${fields}`;
+          let result = await erpGet(url, token);
           
           if (result?.data && Array.isArray(result.data)) {
             companyTypes = result.data;
@@ -78,6 +64,79 @@ export async function GET(req: NextRequest) {
             companyTypes = result;
           } else if (result?.message && Array.isArray(result.message)) {
             companyTypes = result.message;
+          }
+        } catch (idError: any) {
+          // ID ile bulunamadı, devam et
+        }
+
+        // Eğer name (ID) ile bulunamazsa, custom_company_type_name ile dene
+        if (companyTypes.length === 0) {
+          try {
+            const filtersByName = encodeURIComponent(JSON.stringify([
+              ["custom_company_type_name", "=", companyTypeName]
+            ]));
+            let url = `/api/resource/${encodeURIComponent(doctypeName)}?filters=${filtersByName}&fields=${fields}`;
+            let result = await erpGet(url, token);
+            
+            if (result?.data && Array.isArray(result.data)) {
+              companyTypes = result.data;
+            } else if (Array.isArray(result)) {
+              companyTypes = result;
+            } else if (result?.message && Array.isArray(result.message)) {
+              companyTypes = result.message;
+            }
+          } catch (nameError: any) {
+            // custom_company_type_name ile bulunamadı, devam et
+          }
+        }
+
+        // Eğer hala bulunamazsa, company_type_name ile dene
+        if (companyTypes.length === 0) {
+          try {
+            const filtersByName2 = encodeURIComponent(JSON.stringify([
+              ["company_type_name", "=", companyTypeName]
+            ]));
+            let url = `/api/resource/${encodeURIComponent(doctypeName)}?filters=${filtersByName2}&fields=${fields}`;
+            let result = await erpGet(url, token);
+            
+            if (result?.data && Array.isArray(result.data)) {
+              companyTypes = result.data;
+            } else if (Array.isArray(result)) {
+              companyTypes = result;
+            } else if (result?.message && Array.isArray(result.message)) {
+              companyTypes = result.message;
+            }
+          } catch (name2Error: any) {
+            // company_type_name ile bulunamadı, devam et
+          }
+        }
+
+        // Eğer hala bulunamazsa, tüm kayıtları çek ve frontend'den gelen name ile eşleştir
+        if (companyTypes.length === 0) {
+          try {
+            const allFields = encodeURIComponent(JSON.stringify(["*"]));
+            let url = `/api/resource/${encodeURIComponent(doctypeName)}?fields=${allFields}`;
+            let result = await erpGet(url, token);
+            
+            let allCompanyTypes = [];
+            if (result?.data && Array.isArray(result.data)) {
+              allCompanyTypes = result.data;
+            } else if (Array.isArray(result)) {
+              allCompanyTypes = result;
+            } else if (result?.message && Array.isArray(result.message)) {
+              allCompanyTypes = result.message;
+            }
+            
+            // Frontend'den gelen name ile eşleştir (custom_company_type_name, company_type_name veya name)
+            // Case-insensitive ve trim ile eşleştir
+            const searchName = companyTypeName.trim().toLowerCase();
+            companyTypes = allCompanyTypes.filter((ct: any) => {
+              const ctName = (ct.custom_company_type_name || ct.company_type_name || ct.name || "").trim().toLowerCase();
+              const ctId = (ct.name || "").trim().toLowerCase();
+              return ctName === searchName || ctId === searchName;
+            });
+          } catch (allError: any) {
+            // Tüm kayıtları çekemedik, devam et
           }
         }
 

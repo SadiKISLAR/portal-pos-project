@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { erpGet, erpPost, erpPut } from "@/lib/erp";
+import { erpGet, erpPost, erpPut, erpUploadFile } from "@/lib/erp";
 
 /**
  * Bu API endpoint'i Lead'i bulur ve günceller, yoksa oluşturur.
@@ -7,8 +7,10 @@ import { erpGet, erpPost, erpPut } from "@/lib/erp";
  */
 export async function POST(req: NextRequest) {
   try {
+    console.log("=== UPDATE-LEAD ENDPOINT CALLED ===");
     // Check if request is FormData (for file uploads) or JSON
     const contentType = req.headers.get("content-type") || "";
+    console.log("Content-Type:", contentType);
     let email: string = "";
     let companyInfo: any = null;
     let businesses: any = null;
@@ -85,6 +87,7 @@ export async function POST(req: NextRequest) {
     } else {
       // Parse JSON body (backward compatibility)
       const body = await req.json();
+      console.log("Parsing JSON body...");
       email = body.email || "";
       companyInfo = body.companyInfo || null;
       businesses = body.businesses || null;
@@ -92,6 +95,13 @@ export async function POST(req: NextRequest) {
       documents = body.documents || null;
       services = body.services || null;
     }
+
+    console.log("=== PARSED DATA ===");
+    console.log("Email:", email);
+    console.log("CompanyInfo:", companyInfo ? JSON.stringify(companyInfo, null, 2) : "NULL");
+    console.log("Businesses:", businesses ? JSON.stringify(businesses, null, 2) : "NULL");
+    console.log("Businesses is array:", Array.isArray(businesses));
+    console.log("Businesses length:", businesses?.length);
 
     if (!email) {
       return NextResponse.json(
@@ -281,9 +291,12 @@ export async function POST(req: NextRequest) {
         leadPayload.custom_vat_identification_number = companyInfo.vatIdentificationNumber;
       }
       // taxIdNumber için hem undefined/null hem de boş string kontrolü yap
-      // Not: ERPNext'te field adı custom_custom_tax_id_number (double custom prefix)
+      // Not: ERPNext'te field adı custom_tax_id_number veya custom_custom_tax_id_number olabilir
       if (companyInfo.taxIdNumber && companyInfo.taxIdNumber.trim() !== "") {
-        leadPayload.custom_custom_tax_id_number = companyInfo.taxIdNumber.trim();
+        const taxIdValue = companyInfo.taxIdNumber.trim();
+        // Her iki formatı da dene (single ve double custom prefix)
+        leadPayload.custom_tax_id_number = taxIdValue;
+        leadPayload.custom_custom_tax_id_number = taxIdValue;
       } else {
       }
       
@@ -330,18 +343,30 @@ export async function POST(req: NextRequest) {
       }
 
       // Yeni dinamik belge sistemi
+      // Not: File upload şimdilik devre dışı, sadece file name'leri kaydediliyor
       if (documents.documentData) {
-        // Her belge için file name'lerini ve date değerlerini kaydet
         const documentDataToSave: Record<string, any> = {};
+        
+        // Uploaded files'dan file name'leri al (FormData'dan gelen file'lar)
+        const fileNamesByDocId: Record<string, string[]> = {};
+        if (uploadedFiles && Object.keys(uploadedFiles).length > 0) {
+          for (const [docId, files] of Object.entries(uploadedFiles)) {
+            if (files && files.length > 0) {
+              fileNamesByDocId[docId] = files.map(f => f.name);
+            }
+          }
+        }
         
         for (const [docId, docData] of Object.entries(documents.documentData)) {
           const data = docData as { files?: any[]; date?: string };
           
-          if (data.files && data.files.length > 0) {
-            // File name'lerini kaydet (şimdilik, daha sonra ERPNext'e upload edilebilir)
-            const fileNames: string[] = data.files.map((file: any) => file.name || file);
+          // File name'leri önce uploadedFiles'dan al, yoksa documentData'dan al
+          const fileNames = fileNamesByDocId[docId] || 
+                           (data.files && data.files.length > 0 ? data.files.map((file: any) => file.name || file) : []);
+          
+          if (fileNames.length > 0) {
             documentDataToSave[docId] = {
-              files: fileNames,
+              files: fileNames, // File name'leri kaydet (şimdilik URL yerine)
               date: data.date || null,
             };
           } else if (data.date) {
@@ -383,26 +408,68 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Services (varsa) - Child Table olarak kaydet
-    if (services && Array.isArray(services) && services.length > 0) {
-      // Services'i Child Table formatına çevir
-      // ERPNext'te Lead DocType'ında "services" adında bir Child Table olmalı
-      // Child Table DocType: "Lead Service" (veya sizin oluşturduğunuz isim)
-      
-      const servicesChildTable = services.map((serviceId: string, index: number) => {
-        // Service ID'si genellikle Service DocType'ının name field'ıdır
-        // Örnek: "SERVICE-001" veya "REST-SERVICE-001"
-        return {
-          service: serviceId, // Link field - Service DocType'ının name değeri
-          service_name: serviceId, // Geçici olarak ID'yi name olarak kaydet, sonra ERPNext Link'ten çekecek
-          selected_date: new Date().toISOString().split('T')[0], // Bugünün tarihi
-          terms_accepted: 1, // Check field - 1 = true
-          idx: index + 1, // Row sırası
-        };
-      });
+    // Services - Child Table olarak kaydet (boş array de kaydedilmeli)
+    if (services !== null && services !== undefined && Array.isArray(services)) {
+      if (services.length > 0) {
+        // Service ID'lerinden service name'lerini al
+        let serviceNames: string[] = [];
+        try {
+          const serviceFilters = encodeURIComponent(JSON.stringify([
+            ["name", "in", services]
+          ]));
+          const serviceFields = encodeURIComponent(JSON.stringify(["name", "service_name"]));
+          const servicesUrl = `/api/resource/Service?filters=${serviceFilters}&fields=${serviceFields}`;
+          
+          const servicesResult = await erpGet(servicesUrl, token);
+          const servicesData = servicesResult?.data || (Array.isArray(servicesResult) ? servicesResult : []);
+          
+          if (Array.isArray(servicesData) && servicesData.length > 0) {
+            // Service ID'lerine göre name'leri map et
+            const serviceMap = new Map<string, string>();
+            servicesData.forEach((svc: any) => {
+              const serviceId = svc.name;
+              const serviceName = svc.service_name || svc.name || "";
+              serviceMap.set(serviceId, serviceName);
+            });
+            
+            // Service ID'lerinin sırasına göre name'leri al
+            serviceNames = services.map((serviceId: string) => {
+              return serviceMap.get(serviceId) || serviceId;
+            }).filter((name: string) => name);
+          }
+        } catch (serviceNameError: any) {
+          console.warn("Error fetching service names:", serviceNameError);
+          // Service name'leri alınamazsa devam et
+        }
+        
+        // Services'i Child Table formatına çevir
+        // ERPNext'te Lead DocType'ında "services" adında bir Child Table olmalı
+        // Child Table DocType: "Lead Service" (veya sizin oluşturduğunuz isim)
+        
+        const servicesChildTable = services.map((serviceId: string, index: number) => {
+          // Service ID'si genellikle Service DocType'ının name field'ıdır
+          // Örnek: "SERVICE-001" veya "REST-SERVICE-001"
+          return {
+            service: serviceId, // Link field - Service DocType'ının name değeri
+            service_name: serviceId, // Geçici olarak ID'yi name olarak kaydet, sonra ERPNext Link'ten çekecek
+            selected_date: new Date().toISOString().split('T')[0], // Bugünün tarihi
+            terms_accepted: 1, // Check field - 1 = true
+            idx: index + 1, // Row sırası
+          };
+        });
 
-      // Child Table'ı Lead payload'ına ekle
-      leadPayload.services = servicesChildTable;
+        // Child Table'ı Lead payload'ına ekle
+        leadPayload.services = servicesChildTable;
+        
+        // Service name'lerini de kaydet (görüntüleme için)
+        if (serviceNames.length > 0) {
+          leadPayload.custom_selected_service_names = serviceNames.join(", ");
+        }
+      } else {
+        // Boş array - tüm servisleri kaldır
+        leadPayload.services = [];
+        leadPayload.custom_selected_service_names = "";
+      }
       
       // Ayrıca backward compatibility için JSON field'ı da kaydet (eğer hala kullanılıyorsa)
       leadPayload.custom_selected_services = JSON.stringify(services);
@@ -411,17 +478,32 @@ export async function POST(req: NextRequest) {
     // Lead'i oluştur veya güncelle
     let leadResult;
     if (existingLead && existingLead.name) {
-      // Mevcut Lead'i güncelle
-      // PUT için name field'ını kaldır (path'te zaten var)
-      const { name, ...updatePayload } = leadPayload;
-      leadResult = await erpPut(`/api/resource/Lead/${encodeURIComponent(existingLead.name)}`, updatePayload, token);
-    } else {
-      // Yeni Lead oluştur
-      // Yeni Lead oluştururken name field'ını gönderme (ERPNext otomatik oluşturur)
-      const { name, ...createPayload } = leadPayload;
-      
-      try {
-        leadResult = await erpPost("/api/resource/Lead", createPayload, token);
+        // Mevcut Lead'i güncelle
+        // PUT için name field'ını kaldır (path'te zaten var)
+        const { name, ...updatePayload } = leadPayload;
+        
+        // Payload boyutunu kontrol et (debug için)
+        const payloadSize = JSON.stringify(updatePayload).length;
+        console.log(`Updating Lead ${existingLead.name}, payload size: ${payloadSize} bytes`);
+        if (payloadSize > 100000) { // 100KB'den büyükse uyar
+          console.warn(`Large payload size: ${payloadSize} bytes`);
+        }
+        
+        leadResult = await erpPut(`/api/resource/Lead/${encodeURIComponent(existingLead.name)}`, updatePayload, token);
+      } else {
+        // Yeni Lead oluştur
+        // Yeni Lead oluştururken name field'ını gönderme (ERPNext otomatik oluşturur)
+        const { name, ...createPayload } = leadPayload;
+        
+        // Payload boyutunu kontrol et (debug için)
+        const payloadSize = JSON.stringify(createPayload).length;
+        console.log(`Creating new Lead, payload size: ${payloadSize} bytes`);
+        if (payloadSize > 100000) { // 100KB'den büyükse uyar
+          console.warn(`Large payload size: ${payloadSize} bytes`);
+        }
+        
+        try {
+          leadResult = await erpPost("/api/resource/Lead", createPayload, token);
       } catch (createError: any) {
         // Eğer duplicate error alırsak (email zaten kullanılıyorsa), Lead'i tekrar bul ve güncelle
         if (createError.message?.includes("Email Address must be unique") || createError.message?.includes("DuplicateEntryError")) {
@@ -455,32 +537,59 @@ export async function POST(req: NextRequest) {
     
     // Debug: Updated Lead'i kontrol et
 
+    // Address oluşturma durumunu takip et
+    let addressCreationStatus = {
+      companyAddress: { success: false, error: null as string | null, addressName: null as string | null },
+      businessAddresses: [] as Array<{ success: boolean; error: string | null; addressName: string | null }>,
+    };
+
     // Address kaydını oluştur veya güncelle (companyInfo varsa)
+    console.log("=== ADDRESS CREATION CHECK ===");
+    console.log("companyInfo exists:", !!companyInfo);
+    console.log("companyInfo:", companyInfo ? JSON.stringify(companyInfo, null, 2) : "NULL");
+    console.log("leadName:", leadName);
+    console.log("companyInfo.street:", companyInfo?.street);
+    console.log("companyInfo.city:", companyInfo?.city);
+    console.log("companyInfo.country:", companyInfo?.country);
+    console.log("Condition check:", companyInfo && (companyInfo.street || companyInfo.city || companyInfo.country));
+    
     if (companyInfo && (companyInfo.street || companyInfo.city || companyInfo.country)) {
+      console.log("✅ Address creation condition MET - proceeding...");
+      console.log("Address creation condition met - proceeding to create/update Address");
       try {
         // Önce mevcut Address kaydını bul (Lead'e bağlı Billing address)
-        const addressFilters = encodeURIComponent(
-          JSON.stringify([
-            ["link_doctype", "=", "Lead"],
-            ["link_name", "=", leadName],
-            ["address_type", "=", "Billing"]
-          ])
-        );
-        const addressFields = encodeURIComponent(JSON.stringify(["name", "address_title"]));
-        const existingAddressResult = await erpGet(
-          `/api/resource/Address?filters=${addressFilters}&fields=${addressFields}`,
-          token
-        );
+        // Not: Address'leri link_name ile aramak yerine, address_title ile arayalım
+        // Çünkü Links Child Table'ı henüz oluşturulmamış olabilir
+        let existingAddresses: any[] = [];
+        try {
+          // Önce address_title ile ara (daha güvenilir)
+          const addressTitle = companyInfo.companyName || "Billing";
+          const addressFilters = encodeURIComponent(
+            JSON.stringify([
+              ["address_title", "=", addressTitle],
+              ["address_type", "=", "Billing"]
+            ])
+          );
+          const addressFields = encodeURIComponent(JSON.stringify(["name", "address_title", "address_type"]));
+          const existingAddressResult = await erpGet(
+            `/api/resource/Address?filters=${addressFilters}&fields=${addressFields}`,
+            token
+          );
 
-        const existingAddresses = existingAddressResult?.data || (Array.isArray(existingAddressResult) ? existingAddressResult : []);
+          existingAddresses = existingAddressResult?.data || (Array.isArray(existingAddressResult) ? existingAddressResult : []);
+          console.log("Found existing addresses by title:", existingAddresses.length);
+        } catch (searchError: any) {
+          console.warn("Error searching for existing addresses:", searchError?.message);
+          // Devam et, yeni Address oluşturulacak
+        }
         
         // Address payload'ı hazırla
         const addressTitle = companyInfo.companyName || "Billing";
+        // Önce Address'i temel bilgilerle oluştur (Links olmadan)
+        // Links'i sonra ayrı bir işlemle ekleyeceğiz
         const addressPayload: any = {
           address_title: addressTitle,
           address_type: "Billing",
-          link_doctype: "Lead",
-          link_name: leadName,
         };
 
         // Street and House number -> Address Line 1
@@ -510,24 +619,145 @@ export async function POST(req: NextRequest) {
         }
         
 
+        let addressName: string | null = null;
+        
         if (Array.isArray(existingAddresses) && existingAddresses.length > 0) {
           // Mevcut Address'i güncelle
           const existingAddress = existingAddresses[0];
+          addressName = existingAddress.name;
           const { name, ...updateAddressPayload } = addressPayload;
-          await erpPut(`/api/resource/Address/${encodeURIComponent(existingAddress.name)}`, updateAddressPayload, token);
+          console.log("Updating existing Address:", addressName);
+          console.log("Address payload:", JSON.stringify(updateAddressPayload, null, 2));
+          try {
+            if (!addressName) {
+              throw new Error("Address name is null");
+            }
+            const updateResult = await erpPut(`/api/resource/Address/${encodeURIComponent(addressName)}`, updateAddressPayload, token);
+            console.log("Address update result:", updateResult);
+          } catch (updateError: any) {
+            console.error("Address update failed:", updateError);
+            throw updateError;
+          }
         } else {
           // Yeni Address oluştur
-          await erpPost("/api/resource/Address", addressPayload, token);
+          console.log("Creating new Address with payload:", JSON.stringify(addressPayload, null, 2));
+          try {
+            // Retry mekanizması - BrokenPipeError için
+            let createResult;
+            let retryCount = 0;
+            const maxRetries = 3;
+            
+            while (retryCount < maxRetries) {
+              try {
+                createResult = await erpPost("/api/resource/Address", addressPayload, token);
+                console.log(`Address create result (attempt ${retryCount + 1}):`, createResult);
+                break; // Başarılı, döngüden çık
+              } catch (retryError: any) {
+                retryCount++;
+                if (retryCount >= maxRetries) {
+                  throw retryError; // Son deneme de başarısız, hatayı fırlat
+                }
+                // BrokenPipeError ise tekrar dene
+                if (retryError?.message?.includes("BrokenPipeError") || retryError?.message?.includes("Broken pipe")) {
+                  console.warn(`Address create failed (attempt ${retryCount}), retrying in 1 second...`);
+                  await new Promise(resolve => setTimeout(resolve, 1000)); // 1 saniye bekle
+                } else {
+                  throw retryError; // Farklı bir hata, fırlat
+                }
+              }
+            }
+            
+            addressName = createResult?.data?.name || createResult?.name || null;
+            if (addressName) {
+              console.log("Address created successfully:", addressName);
+            }
+          } catch (createError: any) {
+            console.error("Address create failed:", createError);
+            if (createError?.message) {
+              console.error("Create error message:", createError.message);
+            }
+            if (createError?.response) {
+              console.error("Create error response:", createError.response);
+            }
+            throw createError;
+          }
+        }
+        
+        // Address oluşturulduktan/güncellendikten sonra Links Child Table'ını ekle
+        if (addressName) {
+          addressCreationStatus.companyAddress.addressName = addressName;
+          
+          // Links'i eklemek için önce Address'i okuyalım
+          try {
+            const fullAddress = await erpGet(`/api/resource/Address/${encodeURIComponent(addressName)}`, token);
+            const addressData = fullAddress?.data || fullAddress;
+            
+            // Mevcut links varsa onu kullan, yoksa yeni oluştur
+            let linksArray = addressData?.links || [];
+            
+            // Eğer bu Lead zaten links'te yoksa ekle
+            const leadLinkExists = linksArray.some((link: any) => 
+              link.link_doctype === "Lead" && link.link_name === leadName
+            );
+            
+            if (!leadLinkExists) {
+              linksArray.push({
+                link_doctype: "Lead",
+                link_name: leadName,
+                link_title: addressTitle,
+                idx: linksArray.length + 1,
+              });
+              
+              const linksPayload = {
+                links: linksArray,
+              };
+              console.log("Adding Links to Address:", addressName, "with payload:", JSON.stringify(linksPayload, null, 2));
+              const linksUpdateResult = await erpPut(`/api/resource/Address/${encodeURIComponent(addressName)}`, linksPayload, token);
+              console.log("Links update result:", linksUpdateResult);
+            } else {
+              console.log("Lead link already exists in Address links");
+            }
+            
+            addressCreationStatus.companyAddress.success = true;
+          } catch (linksError: any) {
+            console.error("Error adding Links to Address:", linksError);
+            console.error("Links error message:", linksError?.message);
+            // Hata mesajını parse et
+            let errorMsg = linksError?.message || "Failed to add Links to Address";
+            if (typeof errorMsg === "string" && errorMsg.includes("HTTP")) {
+              // HTTP hatası ise sadece hata tipini göster
+              errorMsg = "Failed to add Links to Address (Server Error)";
+            }
+            addressCreationStatus.companyAddress.error = errorMsg;
+            // Links eklenemezse de devam et, Address zaten oluşturuldu
+          }
+        } else {
+          addressCreationStatus.companyAddress.error = "Address created but name is null";
         }
       } catch (addressError: any) {
         console.error("Error creating/updating Address:", addressError);
+        console.error("Error message:", addressError?.message);
+        console.error("Error response:", addressError?.response || addressError);
+        console.error("Error stack:", addressError?.stack);
+        addressCreationStatus.companyAddress.error = addressError?.message || "Failed to create/update Address";
         // Address hatası Lead'i etkilemesin, sadece log'layalım
+        // Ama kullanıcıya bilgi verelim
       }
+    } else {
+      console.log("❌ Address creation condition NOT MET - skipping Address creation");
+      addressCreationStatus.companyAddress.error = "Address creation condition not met (no street, city, or country)";
     }
 
     // Business address'lerini Address DocType'ına kaydet
+    console.log("=== BUSINESS ADDRESS CREATION CHECK ===");
+    console.log("businesses exists:", !!businesses);
+    console.log("businesses is array:", Array.isArray(businesses));
+    console.log("businesses length:", businesses?.length);
+    console.log("businesses:", businesses ? JSON.stringify(businesses, null, 2) : "NULL");
+    console.log("Condition check:", businesses && Array.isArray(businesses) && businesses.length > 0);
     
     if (businesses && Array.isArray(businesses) && businesses.length > 0) {
+      console.log("✅ Business address creation condition MET - proceeding...");
       try {
         
         for (let index = 0; index < businesses.length; index++) {
@@ -536,121 +766,410 @@ export async function POST(req: NextRequest) {
           // Business için gerekli adres bilgileri var mı kontrol et
           // En az city veya country olmalı (street opsiyonel)
           if (!business.city && !business.country) {
+            console.log(`Skipping Business Address ${index} - no city or country`);
             continue;
+          }
+          
+          // Her Business Address arasında bekleme ekle (ilk business hariç)
+          if (index > 0) {
+            console.log(`Waiting 1 second before creating Business Address ${index}...`);
+            await new Promise(resolve => setTimeout(resolve, 1000));
           }
 
           // Business address için Address payload'ı hazırla
           const businessAddressTitle = business.businessName || `Business ${index + 1}`;
+          // Önce Address'i EN MİNİMUM bilgilerle oluştur (sadece zorunlu field'lar)
+          // Company Address ile aynı yaklaşımı kullan - sadece temel field'lar
           const businessAddressPayload: any = {
-            address_title: businessAddressTitle, // Standart field (hala kullanılıyor)
-            address_type: "Shop", // Her zaman "Shop"
-            link_doctype: "Lead",
-            link_name: leadName,
+            address_title: businessAddressTitle,
+            address_type: "Shop",
           };
 
-          // Business Name → b1_business_name (custom field)
-          if (business.businessName) {
-            businessAddressPayload.b1_business_name = business.businessName;
-          }
-
-          // Owner/Managing Director → b1_owner_director
-          if (business.ownerDirector) {
-            businessAddressPayload.b1_owner_director = business.ownerDirector;
-          }
-
-          // Owner Telephone → b1_telephone
-          if (business.ownerTelephone) {
-            const phoneNumber = business.ownerTelephoneCode 
-              ? `${business.ownerTelephoneCode} ${business.ownerTelephone}`.trim()
-              : business.ownerTelephone;
-            businessAddressPayload.b1_telephone = phoneNumber;
-          }
-
-          // Owner Email → b1_email_address
-          if (business.ownerEmail) {
-            businessAddressPayload.b1_email_address = business.ownerEmail;
-          }
-
-          // Street → b1_street_and_house_number
+          // Street and House number -> Address Line 1 (Company Address ile aynı)
           if (business.street) {
-            businessAddressPayload.b1_street_and_house_number = business.street;
+            businessAddressPayload.address_line1 = business.street;
           }
-
-          // City → b1_city
+          
+          // City (Company Address ile aynı)
           if (business.city) {
-            businessAddressPayload.b1_city = business.city;
+            businessAddressPayload.city = business.city;
+            businessAddressPayload.county = business.city; // County olarak da kaydet
           }
-
-          // Postal Code → b1_postal_code
+          
+          // Postal Code (Company Address ile aynı)
           if (business.postalCode) {
-            businessAddressPayload.b1_postal_code = business.postalCode;
+            businessAddressPayload.pincode = business.postalCode;
           }
-
-          // Federal State → b1_federal_state
+          
+          // Federal State (Company Address ile aynı)
           if (business.federalState) {
-            businessAddressPayload.b1_federal_state = business.federalState;
+            businessAddressPayload.state = business.federalState;
           }
-
-          // Country → b1_country
+          
+          // Country (Company Address ile aynı)
           if (business.country) {
-            businessAddressPayload.b1_country = normalizeCountry(business.country);
+            const normalizedCountry = normalizeCountry(business.country);
+            businessAddressPayload.country = normalizedCountry;
           }
-
-          // Different Contact Details (varsa)
-          if (business.differentContact) {
-            // Contact Person → b1_contact_person
-            if (business.contactPerson) {
-              businessAddressPayload.b1_contact_person = business.contactPerson;
-            }
-
-            // Contact Telephone → b1_contact_person_telephone
-            if (business.contactTelephone) {
-              const contactPhoneNumber = business.contactTelephoneCode 
-                ? `${business.contactTelephoneCode} ${business.contactTelephone}`.trim()
-                : business.contactTelephone;
-              businessAddressPayload.b1_contact_person_telephone = contactPhoneNumber;
-            }
-
-            // Contact Email → b1_contact_person_email
-            if (business.contactEmail) {
-              businessAddressPayload.b1_contact_person_email = business.contactEmail;
-            }
-          }
+          
+          // Custom field'ları şimdilik ekleme - bunları Address oluşturulduktan sonra ekleyeceğiz
 
 
           // Mevcut Address'i bul (aynı business için daha önce oluşturulmuş mu?)
-          const businessAddressFilters = encodeURIComponent(
-            JSON.stringify([
-              ["link_doctype", "=", "Lead"],
-              ["link_name", "=", leadName],
-              ["address_type", "=", "Shop"],
-              ["address_title", "=", businessAddressTitle]
-            ])
-          );
-          const businessAddressFields = encodeURIComponent(JSON.stringify(["name", "address_title"]));
-          
+          // Not: address_title ile arayalım, çünkü Links henüz oluşturulmamış olabilir
+          let existingBusinessAddresses: any[] = [];
           try {
+            const businessAddressFilters = encodeURIComponent(
+              JSON.stringify([
+                ["address_title", "=", businessAddressTitle],
+                ["address_type", "=", "Shop"]
+              ])
+            );
+            const businessAddressFields = encodeURIComponent(JSON.stringify(["name", "address_title", "address_type"]));
+            
             const existingBusinessAddressResult = await erpGet(
               `/api/resource/Address?filters=${businessAddressFilters}&fields=${businessAddressFields}`,
               token
             );
 
-            const existingBusinessAddresses = existingBusinessAddressResult?.data || 
+            existingBusinessAddresses = existingBusinessAddressResult?.data || 
               (Array.isArray(existingBusinessAddressResult) ? existingBusinessAddressResult : []);
+            console.log(`Found existing business addresses for ${businessAddressTitle}:`, existingBusinessAddresses.length);
+          } catch (searchError: any) {
+            console.warn(`Error searching for existing business addresses:`, searchError?.message);
+            // Devam et, yeni Address oluşturulacak
+          }
 
+          try {
+            let businessAddressName: string | null = null;
+            
             if (Array.isArray(existingBusinessAddresses) && existingBusinessAddresses.length > 0) {
               // Mevcut Address'i güncelle
               const existingBusinessAddress = existingBusinessAddresses[0];
+              businessAddressName = existingBusinessAddress.name;
               const { name, ...updateBusinessAddressPayload } = businessAddressPayload;
-              await erpPut(`/api/resource/Address/${encodeURIComponent(existingBusinessAddress.name)}`, updateBusinessAddressPayload, token);
+              console.log(`Updating existing Business Address ${index}:`, businessAddressName);
+              console.log(`Business Address payload:`, JSON.stringify(updateBusinessAddressPayload, null, 2));
+              try {
+                const updateResult = await erpPut(`/api/resource/Address/${encodeURIComponent(businessAddressName!)}`, updateBusinessAddressPayload, token);
+                console.log(`Business Address update result:`, updateResult);
+                
+                // Custom field'ları da güncelle
+                try {
+                  const customFieldsPayload: any = {};
+                  
+                  // Business Name → b1_business_name (custom field)
+                  if (business.businessName) {
+                    customFieldsPayload.b1_business_name = business.businessName;
+                  }
+
+                  // Owner/Managing Director → b1_owner_director
+                  if (business.ownerDirector) {
+                    customFieldsPayload.b1_owner_director = business.ownerDirector;
+                  }
+
+                  // Owner Telephone → b1_telephone
+                  // PhoneInput zaten tam telefon numarasını formatında tutuyor (örn: +44 123 456 7890)
+                  if (business.ownerTelephone) {
+                    customFieldsPayload.b1_telephone = business.ownerTelephone;
+                  }
+
+                  // Owner Email → b1_email_address
+                  if (business.ownerEmail) {
+                    customFieldsPayload.b1_email_address = business.ownerEmail;
+                  }
+
+                  // Street → b1_street_and_house_number (custom field)
+                  if (business.street) {
+                    customFieldsPayload.b1_street_and_house_number = business.street;
+                  }
+
+                  // City → b1_city (custom field)
+                  if (business.city) {
+                    customFieldsPayload.b1_city = business.city;
+                  }
+
+                  // Postal Code → b1_postal_code (custom field)
+                  if (business.postalCode) {
+                    customFieldsPayload.b1_postal_code = business.postalCode;
+                  }
+
+                  // Federal State → b1_federal_state (custom field)
+                  if (business.federalState) {
+                    customFieldsPayload.b1_federal_state = business.federalState;
+                  }
+
+                  // Country → b1_country (custom field)
+                  if (business.country) {
+                    const normalizedCountry = normalizeCountry(business.country);
+                    customFieldsPayload.b1_country = normalizedCountry;
+                  }
+
+                  // Different Contact Details (varsa)
+                  if (business.differentContact) {
+                    // Contact Person → b1_contact_person
+                    if (business.contactPerson) {
+                      customFieldsPayload.b1_contact_person = business.contactPerson;
+                    }
+
+                    // Contact Telephone → b1_contact_person_telephone
+                    if (business.contactTelephone) {
+                      // PhoneInput zaten tam telefon numarasını formatında tutuyor (örn: +44 123 456 7890)
+                      customFieldsPayload.b1_contact_person_telephone = business.contactTelephone;
+                    }
+
+                    // Contact Email → b1_contact_person_email
+                    if (business.contactEmail) {
+                      customFieldsPayload.b1_contact_person_email = business.contactEmail;
+                    }
+                  }
+                  
+                  // Custom field'ları güncelle (eğer varsa)
+                  if (Object.keys(customFieldsPayload).length > 0) {
+                    console.log(`Updating custom fields for Business Address ${index}:`, JSON.stringify(customFieldsPayload, null, 2));
+                    await erpPut(`/api/resource/Address/${encodeURIComponent(businessAddressName!)}`, customFieldsPayload, token);
+                    console.log(`Custom fields updated successfully for Business Address ${index}`);
+                  }
+                } catch (customFieldsError: any) {
+                  console.warn(`Error updating custom fields for Business Address ${index}:`, customFieldsError?.message);
+                  // Custom field'lar güncellenemezse de devam et
+                }
+              } catch (updateError: any) {
+                console.error(`Business Address update failed:`, updateError);
+                throw updateError;
+              }
             } else {
-              // Yeni Address oluştur
-              const createResult = await erpPost("/api/resource/Address", businessAddressPayload, token);
+              // Yeni Address oluştur (sadece standart field'larla)
+              console.log(`Creating new Business Address ${index} with payload:`, JSON.stringify(businessAddressPayload, null, 2));
+              try {
+                // ERPNext'in önceki işlemi tamamlaması için kısa bir bekleme
+                if (index > 0) {
+                  await new Promise(resolve => setTimeout(resolve, 1000)); // 1 saniye bekle
+                }
+                
+                // Retry mekanizması - BrokenPipeError için
+                let createResult;
+                let retryCount = 0;
+                const maxRetries = 3;
+                
+                while (retryCount < maxRetries) {
+                  try {
+                    createResult = await erpPost("/api/resource/Address", businessAddressPayload, token);
+                    console.log(`Business Address create result (attempt ${retryCount + 1}):`, createResult);
+                    break; // Başarılı, döngüden çık
+                  } catch (retryError: any) {
+                    retryCount++;
+                    if (retryCount >= maxRetries) {
+                      throw retryError; // Son deneme de başarısız, hatayı fırlat
+                    }
+                    // BrokenPipeError ise tekrar dene
+                    if (retryError?.message?.includes("BrokenPipeError") || retryError?.message?.includes("Broken pipe")) {
+                      console.warn(`Business Address create failed (attempt ${retryCount}), retrying in 1 second...`);
+                      await new Promise(resolve => setTimeout(resolve, 1000)); // 1 saniye bekle
+                    } else {
+                      throw retryError; // Farklı bir hata, fırlat
+                    }
+                  }
+                }
+                
+                businessAddressName = createResult?.data?.name || createResult?.name || null;
+                if (businessAddressName) {
+                  console.log(`Business Address created successfully:`, businessAddressName);
+                  
+                  // Address oluşturulduktan sonra eksik standart field'ları ekle
+                  try {
+                    const additionalStandardFields: any = {};
+                    
+                    // Postal Code → pincode (standart field)
+                    if (business.postalCode) {
+                      additionalStandardFields.pincode = business.postalCode;
+                    }
+
+                    // Federal State → state (standart field)
+                    if (business.federalState) {
+                      additionalStandardFields.state = business.federalState;
+                    }
+
+                    // County
+                    if (business.city) {
+                      additionalStandardFields.county = business.city;
+                    }
+                    
+                    // Eksik standart field'ları ekle
+                    if (Object.keys(additionalStandardFields).length > 0) {
+                      console.log(`Adding additional standard fields to Business Address ${index}:`, JSON.stringify(additionalStandardFields, null, 2));
+                      await erpPut(`/api/resource/Address/${encodeURIComponent(businessAddressName)}`, additionalStandardFields, token);
+                      console.log(`Additional standard fields added successfully to Business Address ${index}`);
+                    }
+                  } catch (standardFieldsError: any) {
+                    console.warn(`Error adding additional standard fields to Business Address ${index}:`, standardFieldsError?.message);
+                    // Devam et
+                  }
+                  
+                  // Address oluşturulduktan sonra custom field'ları ekle
+                  try {
+                    const customFieldsPayload: any = {};
+                    
+                    // Business Name → b1_business_name (custom field)
+                    if (business.businessName) {
+                      customFieldsPayload.b1_business_name = business.businessName;
+                    }
+
+                    // Owner/Managing Director → b1_owner_director
+                    if (business.ownerDirector) {
+                      customFieldsPayload.b1_owner_director = business.ownerDirector;
+                    }
+
+                    // Owner Telephone → b1_telephone
+                    if (business.ownerTelephone) {
+                    // PhoneInput zaten tam telefon numarasını formatında tutuyor (örn: +44 123 456 7890)
+                    customFieldsPayload.b1_telephone = business.ownerTelephone;
+                    }
+
+                    // Owner Email → b1_email_address
+                    if (business.ownerEmail) {
+                      customFieldsPayload.b1_email_address = business.ownerEmail;
+                    }
+
+                    // Street → b1_street_and_house_number (custom field)
+                    if (business.street) {
+                      customFieldsPayload.b1_street_and_house_number = business.street;
+                    }
+
+                    // City → b1_city (custom field)
+                    if (business.city) {
+                      customFieldsPayload.b1_city = business.city;
+                    }
+
+                    // Postal Code → b1_postal_code (custom field)
+                    if (business.postalCode) {
+                      customFieldsPayload.b1_postal_code = business.postalCode;
+                    }
+
+                    // Federal State → b1_federal_state (custom field)
+                    if (business.federalState) {
+                      customFieldsPayload.b1_federal_state = business.federalState;
+                    }
+
+                    // Country → b1_country (custom field)
+                    if (business.country) {
+                      const normalizedCountry = normalizeCountry(business.country);
+                      customFieldsPayload.b1_country = normalizedCountry;
+                    }
+
+                    // Different Contact Details (varsa)
+                    if (business.differentContact) {
+                      // Contact Person → b1_contact_person
+                      if (business.contactPerson) {
+                        customFieldsPayload.b1_contact_person = business.contactPerson;
+                      }
+
+                      // Contact Telephone → b1_contact_person_telephone
+                      if (business.contactTelephone) {
+                        const contactPhoneNumber = business.contactTelephoneCode 
+                          ? `${business.contactTelephoneCode} ${business.contactTelephone}`.trim()
+                          : business.contactTelephone;
+                        customFieldsPayload.b1_contact_person_telephone = contactPhoneNumber;
+                      }
+
+                      // Contact Email → b1_contact_person_email
+                      if (business.contactEmail) {
+                        customFieldsPayload.b1_contact_person_email = business.contactEmail;
+                      }
+                    }
+                    
+                    // Custom field'ları ekle (eğer varsa)
+                    if (Object.keys(customFieldsPayload).length > 0) {
+                      console.log(`Adding custom fields to Business Address ${index}:`, JSON.stringify(customFieldsPayload, null, 2));
+                      await erpPut(`/api/resource/Address/${encodeURIComponent(businessAddressName)}`, customFieldsPayload, token);
+                      console.log(`Custom fields added successfully to Business Address ${index}`);
+                    }
+                  } catch (customFieldsError: any) {
+                    console.warn(`Error adding custom fields to Business Address ${index}:`, customFieldsError?.message);
+                    // Custom field'lar eklenemezse de devam et, Address zaten oluşturuldu
+                  }
+                }
+              } catch (createError: any) {
+                console.error(`Business Address create failed:`, createError);
+                if (createError?.message) {
+                  console.error(`Create error message:`, createError.message);
+                }
+                if (createError?.response) {
+                  console.error(`Create error response:`, createError.response);
+                }
+                throw createError;
+              }
+            }
+            
+            // Address oluşturulduktan/güncellendikten sonra Links Child Table'ını ekle
+            if (businessAddressName) {
+              addressCreationStatus.businessAddresses[index] = {
+                success: false,
+                error: null,
+                addressName: businessAddressName,
+              };
+              
+              // Links'i eklemek için önce Address'i okuyalım
+              try {
+                const fullBusinessAddress = await erpGet(`/api/resource/Address/${encodeURIComponent(businessAddressName)}`, token);
+                const businessAddressData = fullBusinessAddress?.data || fullBusinessAddress;
+                
+                // Mevcut links varsa onu kullan, yoksa yeni oluştur
+                let businessLinksArray = businessAddressData?.links || [];
+                
+                // Eğer bu Lead zaten links'te yoksa ekle
+                const leadLinkExists = businessLinksArray.some((link: any) => 
+                  link.link_doctype === "Lead" && link.link_name === leadName
+                );
+                
+                if (!leadLinkExists) {
+                  businessLinksArray.push({
+                    link_doctype: "Lead",
+                    link_name: leadName,
+                    link_title: businessAddressTitle,
+                    idx: businessLinksArray.length + 1,
+                  });
+                  
+                  const businessLinksPayload = {
+                    links: businessLinksArray,
+                  };
+                  console.log(`Adding Links to Business Address ${index}:`, businessAddressName, "with payload:", JSON.stringify(businessLinksPayload, null, 2));
+                  const businessLinksUpdateResult = await erpPut(`/api/resource/Address/${encodeURIComponent(businessAddressName)}`, businessLinksPayload, token);
+                  console.log(`Business Links update result:`, businessLinksUpdateResult);
+                } else {
+                  console.log(`Lead link already exists in Business Address ${index} links`);
+                }
+                
+                addressCreationStatus.businessAddresses[index].success = true;
+              } catch (businessLinksError: any) {
+                console.error(`Error adding Links to Business Address ${index}:`, businessLinksError);
+                console.error(`Business Links error message:`, businessLinksError?.message);
+                // Hata mesajını parse et
+                let errorMsg = businessLinksError?.message || "Failed to add Links to Business Address";
+                if (typeof errorMsg === "string" && errorMsg.includes("HTTP")) {
+                  // HTTP hatası ise sadece hata tipini göster
+                  errorMsg = "Failed to add Links to Business Address (Server Error)";
+                }
+                addressCreationStatus.businessAddresses[index].error = errorMsg;
+                // Links eklenemezse de devam et, Address zaten oluşturuldu
+              }
+            } else {
+              addressCreationStatus.businessAddresses[index] = {
+                success: false,
+                error: "Business Address created but name is null",
+                addressName: null,
+              };
             }
           } catch (businessAddressError: any) {
             console.error(`Error creating/updating business address ${index}:`, businessAddressError);
             console.error(`Error message:`, businessAddressError.message);
             console.error(`Error response:`, businessAddressError.response || businessAddressError);
+            console.error(`Error stack:`, businessAddressError.stack);
+            addressCreationStatus.businessAddresses[index] = {
+              success: false,
+              error: businessAddressError?.message || "Failed to create/update Business Address",
+              addressName: null,
+            };
             // Business address hatası diğer business'leri etkilemesin, devam et
           }
         }
@@ -658,24 +1177,131 @@ export async function POST(req: NextRequest) {
         console.error("Error processing business addresses:", businessAddressesError);
         // Business address'leri hatası Lead'i etkilemesin, sadece log'layalım
       }
+    } else {
+      console.log("❌ Business address creation condition NOT MET - skipping Business Address creation");
     }
+
+    // File upload işlemi (Lead oluşturulduktan sonra)
+    // NOT: File upload şimdilik devre dışı, sadece file name'leri kaydediyoruz
+    // File upload'ı daha sonra aktif edeceğiz
+    if (false && uploadedFiles && Object.keys(uploadedFiles).length > 0 && documents?.documentData) {
+      try {
+        const documentDataToUpdate: Record<string, any> = {};
+        
+        // Mevcut document data'yı parse et (eğer varsa)
+        let existingDocumentData: Record<string, any> = {};
+        if (updatedLead.custom_document_data) {
+          try {
+            existingDocumentData = JSON.parse(updatedLead.custom_document_data);
+          } catch (parseError) {
+            console.warn("Error parsing existing document data:", parseError);
+          }
+        }
+        
+        // Her belge için file'ları upload et
+        for (const [docId, files] of Object.entries(uploadedFiles)) {
+          if (files && files.length > 0) {
+            const uploadedFileUrls: string[] = [];
+            
+            // Her file'ı upload et
+            for (const file of files) {
+              try {
+                // Folder path: Home/Attachments/Lead/{LeadName}/{DocumentId}
+                const folderPath = `Home/Attachments/Lead/${leadName}/${docId}`;
+                const fileUrl = await erpUploadFile(file, folderPath, token);
+                uploadedFileUrls.push(fileUrl);
+              } catch (uploadError: any) {
+                console.error(`Error uploading file ${file.name} for document ${docId}:`, uploadError);
+                console.error(`Error message:`, uploadError.message);
+                console.error(`Error stack:`, uploadError.stack);
+                // Upload hatası olsa bile devam et, diğer file'ları yükle
+              }
+            }
+            
+            // Document data'yı güncelle
+            const existingDocData = existingDocumentData[docId] || documents.documentData[docId] || {};
+            documentDataToUpdate[docId] = {
+              files: uploadedFileUrls.length > 0 ? uploadedFileUrls : (existingDocData.files || []),
+              fileNames: files.map(f => f.name), // Original file names
+              date: existingDocData.date || null,
+            };
+          }
+        }
+        
+        // Date field'ları da ekle (file olmayan belgeler için)
+        if (documents.documentData) {
+          for (const [docId, docData] of Object.entries(documents.documentData)) {
+            const data = docData as { files?: any[]; date?: string };
+            
+            // Eğer bu belge için file upload yapılmadıysa ama date varsa, date'i kaydet
+            if (!documentDataToUpdate[docId] && data.date) {
+              documentDataToUpdate[docId] = {
+                files: [],
+                date: data.date,
+              };
+            } else if (documentDataToUpdate[docId] && data.date) {
+              // File upload yapıldıysa ama date de varsa, date'i ekle
+              documentDataToUpdate[docId].date = data.date;
+            }
+          }
+        }
+        
+        // Document data'yı Lead'e kaydet
+        if (Object.keys(documentDataToUpdate).length > 0) {
+          const finalDocumentData = { ...existingDocumentData, ...documentDataToUpdate };
+          await erpPut(
+            `/api/resource/Lead/${encodeURIComponent(leadName)}`,
+            { custom_document_data: JSON.stringify(finalDocumentData) },
+            token
+          );
+        }
+      } catch (fileUploadError: any) {
+        console.error("Error uploading files:", fileUploadError);
+        console.error("Error message:", fileUploadError.message);
+        console.error("Error stack:", fileUploadError.stack);
+        // File upload hatası Lead'i etkilemesin, sadece log'layalım
+        // Kullanıcıya hata mesajı gösterilmez, çünkü Lead zaten oluşturuldu
+      }
+    }
+
+    console.log("=== FINAL ADDRESS CREATION STATUS ===");
+    console.log(JSON.stringify(addressCreationStatus, null, 2));
 
     return NextResponse.json({
       success: true,
       lead: updatedLead,
       message: existingLead ? "Lead updated successfully" : "Lead created successfully",
+      addressCreationStatus: addressCreationStatus,
     });
   } catch (e: any) {
     console.error("ERP lead update/create error:", e);
+    console.error("Error type:", typeof e);
+    console.error("Error message:", e?.message);
+    console.error("Error stack:", e?.stack);
     
-    const errorMessage = typeof e?.message === "string" ? e.message : "";
+    // ERPNext'ten gelen hata mesajını parse et
+    let errorMessage = "Failed to update/create lead in ERP";
+    
+    if (typeof e?.message === "string") {
+      errorMessage = e.message;
+      
+      // BrokenPipeError kontrolü
+      if (e.message.includes("BrokenPipeError") || e.message.includes("Broken pipe")) {
+        errorMessage = "Server connection error. Please try again or reduce the file size.";
+      }
+    }
+    
+    // Eğer response varsa, onu da log'la
+    if (e?.response) {
+      console.error("Error response:", e.response);
+    }
     
     return NextResponse.json(
       {
-        error: errorMessage || "Failed to update/create lead in ERP",
+        error: errorMessage,
+        details: process.env.NODE_ENV === "development" ? e?.message : undefined,
       },
       { status: 500 }
     );
   }
 }
-
