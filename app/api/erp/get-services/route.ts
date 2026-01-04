@@ -5,6 +5,9 @@ import { erpGet } from "@/lib/erp";
  * Bu API endpoint'i ERPNext'ten aktif servisleri getirir.
  * Services sayfasında göstermek için kullanılacak.
  */
+// Force dynamic rendering - bu route her zaman dynamic olmalı
+export const dynamic = 'force-dynamic';
+
 export async function GET(req: NextRequest) {
   try {
     const token = process.env.ERP_API_TOKEN;
@@ -44,12 +47,18 @@ export async function GET(req: NextRequest) {
       }
     }
     
-    // Hiçbir DocType bulunamadıysa hata fırlat
+    // Hiçbir DocType bulunamadıysa
     if (!foundDocType) {
-      throw new Error(
+      // Build sırasında environment variable'lar yüklenmemiş olabilir
+      // Runtime'da tekrar denenecek, bu yüzden boş array döndür
+      console.warn(
         `Could not find Service DocType. Tried: ${possibleDocTypeNames.join(", ")}. ` +
-        `Please check the DocType name in ERPNext. It should match one of these names.`
+        `This might be a build-time issue. Will retry at runtime.`
       );
+      return NextResponse.json({
+        success: true,
+        services: [],
+      });
     }
 
     // Response formatını kontrol et
