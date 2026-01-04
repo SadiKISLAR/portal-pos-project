@@ -27,7 +27,7 @@ export default function ProgressBar() {
               {/* Step Container - Label and Circle together */}
               <div className="flex flex-col items-center flex-1 relative">
                 {/* Label above circle */}
-                <div className="text-xs font-bold text-gray-900 uppercase text-center mb-4 px-1 whitespace-nowrap">
+                <div className="text-[10px] sm:text-xs font-bold text-gray-900 uppercase text-center mb-4 px-1 break-words leading-tight">
                   {step.label}
                 </div>
                 
