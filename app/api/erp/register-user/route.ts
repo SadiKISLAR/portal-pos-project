@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { erpPost } from "@/lib/erp";
+import { erpPost, erpGet } from "@/lib/erp";
 
 export async function POST(req: NextRequest) {
   try {
@@ -39,62 +39,229 @@ export async function POST(req: NextRequest) {
     const createdUser = userResult?.data || userResult;
     const userName = createdUser?.name || email;
 
-    // 2) Ek bilgileri Custom User Register DocType'ına yaz
+    // 2) Ek bilgileri Custom User Register DocType'ına yaz (Opsiyonel - hata verirse atla)
     // Not: DocType adı ERP'de oluşturduğun isimle birebir aynı olmalı.
-    const registrationPayload: any = {
-      user: userName,
-      email,
-    };
+    let registrationResult = null;
+    try {
+      const registrationPayload: any = {
+        user: userName,
+        email,
+      };
 
-    if (reference) {
-      registrationPayload.reference = reference;
+      if (reference) {
+        registrationPayload.reference = reference;
+      }
+
+      if (companyName) {
+        registrationPayload.company_name = companyName;
+      }
+
+      if (firstName) {
+        registrationPayload.customer_name = firstName;
+      }
+
+      if (telephone) {
+        registrationPayload.telephone = telephone;
+      }
+
+      const registrationDoctype = "Custom User Register";
+      registrationResult = await erpPost(
+        `/api/resource/${encodeURIComponent(registrationDoctype)}`,
+        registrationPayload,
+        token
+      );
+    } catch (registrationError: any) {
+      // Custom User Register opsiyonel - hata verirse sadece log'la ve devam et
+      console.warn("Custom User Register oluşturulamadı (opsiyonel):", registrationError?.message);
     }
 
-    if (companyName) {
-      registrationPayload.company_name = companyName;
-    }
+    // 3) Lead oluştur (User ve Custom User Register oluşturulduktan sonra)
+    let createdLead = null;
+    try {
+      // Önce mevcut Lead var mı kontrol et (email ile)
+      let existingLead = null;
+      try {
+        const leadFilters = encodeURIComponent(JSON.stringify([["email_id", "=", email]]));
+        const leadFields = encodeURIComponent(JSON.stringify(["name", "email_id", "company_name"]));
+        
+        const leadResult = await erpGet(
+          `/api/resource/Lead?filters=${leadFilters}&fields=${leadFields}&limit_page_length=1`,
+          token
+        );
 
-    if (firstName) {
-      registrationPayload.customer_name = firstName;
-    }
+        // ERPNext response formatını kontrol et
+        let leads = [];
+        if (leadResult?.data && Array.isArray(leadResult.data)) {
+          leads = leadResult.data;
+        } else if (Array.isArray(leadResult)) {
+          leads = leadResult;
+        } else if (leadResult?.message && Array.isArray(leadResult.message)) {
+          leads = leadResult.message;
+        }
 
-    if (telephone) {
-      registrationPayload.telephone = telephone;
-    }
+        if (leads.length > 0) {
+          existingLead = leads[0];
+        }
+      } catch (leadCheckError: any) {
+        // Lead kontrolü başarısız olursa devam et, yeni Lead oluşturulacak
+        console.warn("Error checking existing Lead:", leadCheckError);
+      }
 
-    const registrationDoctype = "Custom User Register";
-    const registrationResult = await erpPost(
-      `/api/resource/${encodeURIComponent(registrationDoctype)}`,
-      registrationPayload,
-      token
-    );
+      // Eğer Lead yoksa oluştur
+      if (!existingLead) {
+        // Country isimlerini normalize et
+        const normalizeCountry = (country: string | undefined | null): string | undefined => {
+          if (!country) return country ?? undefined;
+
+          const map: Record<string, string> = {
+            "Türkiye": "Turkey",
+            "Turkiye": "Turkey",
+            "Republic of Turkey": "Turkey",
+            "Deutschland": "Germany",
+            "Federal Republic of Germany": "Germany",
+            "United States of America": "United States",
+          };
+
+          return map[country] || country;
+        };
+
+        // Lead payload'ı hazırla
+        const leadPayload: any = {
+          email_id: email,
+          status: "Open",
+          lead_type: "Client",
+        };
+
+        // Lead name ve company name
+        const leadCompanyName = registrationResult?.data?.company_name || companyName || firstName || email;
+        leadPayload.lead_name = leadCompanyName;
+        leadPayload.company_name = leadCompanyName;
+
+        // Telefon numarası
+        if (telephone) {
+          leadPayload.phone = telephone;
+          leadPayload.mobile_no = telephone;
+        }
+
+        // Lead oluştur
+        try {
+          const leadResult = await erpPost("/api/resource/Lead", leadPayload, token);
+          createdLead = leadResult?.data || leadResult;
+        } catch (createError: any) {
+          // Eğer duplicate error alırsak (email zaten kullanılıyorsa), Lead'i tekrar bul
+          if (createError.message?.includes("Email Address must be unique") || createError.message?.includes("DuplicateEntryError")) {
+            const leadFilters = encodeURIComponent(JSON.stringify([["email_id", "=", email]]));
+            const leadFields = encodeURIComponent(JSON.stringify(["name", "email_id"]));
+            const retryLeadResult = await erpGet(
+              `/api/resource/Lead?filters=${leadFilters}&fields=${leadFields}`,
+              token
+            );
+
+            const retryLeads = retryLeadResult?.data || (Array.isArray(retryLeadResult) ? retryLeadResult : []);
+            if (Array.isArray(retryLeads) && retryLeads.length > 0) {
+              createdLead = retryLeads[0];
+            } else {
+              // Bulamadıysak hatayı log'la ama devam et
+              console.warn("Lead duplicate error but could not find existing Lead:", createError);
+            }
+          } else {
+            // Başka bir hata ise log'la ama devam et (Lead oluşturulamazsa bile User oluşturuldu)
+            console.warn("Error creating Lead (non-critical):", createError);
+          }
+        }
+      } else {
+        // Mevcut Lead varsa onu kullan
+        createdLead = existingLead;
+      }
+    } catch (leadError: any) {
+      // Lead oluşturma hatası kritik değil - User zaten oluşturuldu
+      // Sadece log'la ve devam et
+      console.warn("Error creating Lead (non-critical):", leadError);
+    }
 
     return NextResponse.json({
       success: true,
       user: createdUser,
-      registration: registrationResult?.data || registrationResult,
+      registration: registrationResult?.data || registrationResult || null,
+      lead: createdLead,
     });
   } catch (e: any) {
     console.error("ERP user registration error:", e);
+    console.error("Error message:", e?.message);
     
     // ERPNext hata mesajını parse et
-    const errorMessage = typeof e?.message === "string" ? e.message : "";
+    let errorMessage = typeof e?.message === "string" ? e.message : "";
     
-    // Parola güvenlik hatası kontrolü
+    // HTTP error formatından gerçek hata mesajını çıkar
+    // Format: "HTTP 400 Bad Request: {...}"
+    if (errorMessage.includes("HTTP") && errorMessage.includes(":")) {
+      const parts = errorMessage.split(":");
+      if (parts.length > 1) {
+        const jsonPart = parts.slice(1).join(":").trim();
+        try {
+          const errorJson = JSON.parse(jsonPart);
+          if (errorJson.message) {
+            errorMessage = errorJson.message;
+          } else if (errorJson.exc) {
+            errorMessage = errorJson.exc;
+          } else if (typeof errorJson === "object") {
+            // ERPNext hata objesi içindeki mesajı bul
+            const excMessage = errorJson.exception || errorJson.error || JSON.stringify(errorJson);
+            errorMessage = excMessage;
+          }
+        } catch {
+          // JSON parse edilemezse, orijinal mesajı kullan
+        }
+      }
+    }
+    
+    const errorText = errorMessage.toLowerCase();
+    
+    // Email zaten kullanılıyor hatası
     if (
-      errorMessage.includes("commonly used password") ||
-      errorMessage.includes("All-uppercase") ||
-      errorMessage.includes("all-lowercase") ||
-      errorMessage.includes("ValidationError") ||
-      errorMessage.includes("password")
+      errorText.includes("already exists") ||
+      errorText.includes("duplicate") ||
+      errorText.includes("email address must be unique") ||
+      errorText.includes("already registered")
     ) {
+      return NextResponse.json(
+        {
+          error: "Bu email adresi zaten kullanılıyor. Lütfen farklı bir email adresi deneyin.",
+          errorType: "email_exists",
+        },
+        { status: 400 }
+      );
+    }
+    
+    // Parola güvenlik hatası kontrolü - sadece gerçek parola hatalarını yakala
+    const isPasswordError = 
+      errorText.includes("commonly used password") ||
+      errorText.includes("all-uppercase") ||
+      errorText.includes("all-lowercase") ||
+      errorText.includes("too common") ||
+      errorText.includes("password validation") ||
+      errorText.includes("password strength") ||
+      (errorText.includes("password") && (
+        errorText.includes("weak") ||
+        errorText.includes("invalid") ||
+        errorText.includes("not strong") ||
+        errorText.includes("must contain") ||
+        errorText.includes("too short") ||
+        errorText.includes("too long")
+      ));
+    
+    if (isPasswordError) {
       // ERPNext'in parola hatasını daha anlaşılır hale getir
-      let userFriendlyMessage = "Parola çok zayıf. Lütfen daha güçlü bir parola kullanın.";
+      let userFriendlyMessage = "Parola gereksinimleri karşılanmıyor. Lütfen daha güçlü bir parola kullanın.";
       
-      if (errorMessage.includes("commonly used password")) {
+      if (errorText.includes("commonly used password") || errorText.includes("too common")) {
         userFriendlyMessage = "Bu parola çok yaygın kullanılan bir parolaya benziyor. Lütfen daha benzersiz bir parola seçin.";
-      } else if (errorMessage.includes("All-uppercase") || errorMessage.includes("all-lowercase")) {
+      } else if (errorText.includes("all-uppercase") || errorText.includes("all-lowercase")) {
         userFriendlyMessage = "Parola hem büyük hem küçük harf içermelidir.";
+      } else if (errorText.includes("too short")) {
+        userFriendlyMessage = "Parola çok kısa. Lütfen daha uzun bir parola kullanın.";
+      } else if (errorText.includes("too long")) {
+        userFriendlyMessage = "Parola çok uzun. Lütfen daha kısa bir parola kullanın.";
       }
       
       return NextResponse.json(
@@ -106,10 +273,22 @@ export async function POST(req: NextRequest) {
       );
     }
     
-    // Diğer hatalar için genel mesaj
+    // Diğer hatalar için gerçek hata mesajını döndür
+    // Eğer hata mesajı çok uzun veya HTML içeriyorsa, genel bir mesaj döndür
+    let finalErrorMessage = errorMessage;
+    if (!errorMessage || errorMessage.length > 500 || errorMessage.includes("<html>") || errorMessage.includes("<!doctype")) {
+      finalErrorMessage = "User registration failed. Please check your information and try again.";
+    }
+    
+    // Hata mesajını temizle (gereksiz prefix'leri kaldır)
+    finalErrorMessage = finalErrorMessage
+      .replace(/^http \d+ /i, "")
+      .replace(/^bad request: /i, "")
+      .trim();
+    
     return NextResponse.json(
       {
-        error: errorMessage || "Kullanıcı kaydı başarısız oldu. Lütfen tekrar deneyin.",
+        error: finalErrorMessage || "User registration failed. Please try again.",
       },
       { status: 500 }
     );

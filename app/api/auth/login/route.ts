@@ -23,8 +23,23 @@ export async function POST(req: NextRequest) {
     });
   } catch (e: any) {
     console.error('Login error:', e);
+    
+    // Hata mesajını kullanıcı dostu hale getir
+    let errorMessage = 'Login failed. Please check your username and password.';
+    
+    if (e.message) {
+      // Hata mesajlarını kontrol et
+      if (e.message.includes('Invalid') || e.message.includes('username') || e.message.includes('password') || e.message.includes('AuthenticationError') || e.message.includes('Invalid login')) {
+        errorMessage = 'Invalid username or password';
+      } else if (e.message.includes('BrokenPipeError') || e.message.includes('connection') || e.message.includes('Broken pipe')) {
+        errorMessage = 'Server connection error. Please try again.';
+      } else {
+        errorMessage = e.message;
+      }
+    }
+    
     return NextResponse.json(
-      { error: e.message || 'Login failed' },
+      { error: errorMessage },
       { status: 401 }
     );
   }

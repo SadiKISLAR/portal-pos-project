@@ -10,17 +10,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import RegisterButton from "@/components/RegisterButton";
 import { Eye, EyeOff } from "lucide-react";
+import PhoneInput from "react-phone-number-input";
+import "react-phone-number-input/style.css";
 
-// Function to get country flag emoji based on country code
-function getCountryFlag(countryCode: string): string {
-  const flagMap: Record<string, string> = {
-    "+44": "🇬🇧", // United Kingdom
-    "+1": "🇺🇸", // United States
-    "+90": "🇹🇷", // Turkey
-    "+49": "🇩🇪", // Germany
-  };
-  return flagMap[countryCode] || "🇬🇧";
-}
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -31,7 +23,6 @@ export default function RegisterPage() {
     lastName: "",
     email: "",
     telephone: "",
-    telephoneCode: "+44",
     password: "",
   });
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -207,7 +198,8 @@ export default function RegisterPage() {
 
     // ERP'de User oluştur
     try {
-      const telephoneFull = `${formData.telephoneCode} ${formData.telephone}`;
+      // react-phone-number-input zaten tam telefon numarasını formatında tutuyor
+      const telephoneFull = formData.telephone || "";
 
       const res = await fetch("/api/erp/register-user", {
         method: "POST",
@@ -229,9 +221,9 @@ export default function RegisterPage() {
       if (!res.ok || !data.success) {
         // Parola hatası için özel mesaj göster
         if (data.errorType === "password_validation") {
-          alert(data.error || "Parola gereksinimleri karşılanmıyor. Lütfen daha güçlü bir parola kullanın.");
+          alert(data.error || "Password requirements not met. Please use a stronger password.");
         } else {
-          alert(data.error || "Kullanıcı kaydı başarısız oldu. Lütfen tekrar deneyin.");
+          alert(data.error || "User registration failed. Please try again.");
         }
         return;
       }
@@ -245,7 +237,7 @@ export default function RegisterPage() {
     if (typeof window !== "undefined") {
       localStorage.setItem(
         "initialRegistrationData",
-        JSON.stringify({ ...formData, confirmPassword, telephoneCode: formData.telephoneCode })
+        JSON.stringify({ ...formData, confirmPassword })
       );
       // Yeni kullanıcı kaydı başladığında eski registration data'yı temizle
       // Böylece form boş başlayacak ve sadece Lead'den veri yüklenecek
@@ -347,31 +339,18 @@ export default function RegisterPage() {
                     <Label htmlFor="telephone" className="text-[18px] font-semibold text-gray-700">
                       Telephone number <span className="text-red-500">*</span>
                     </Label>
-                    <div className="flex gap-2">
-                      <div className="flex items-center gap-1 px-3 border border-gray-300 rounded-md bg-white">
-                        <span className="text-xl">{getCountryFlag(formData.telephoneCode)}</span>
-                        <select
-                          className="border-0 outline-none bg-transparent text-sm"
-                          value={formData.telephoneCode}
-                          onChange={(e) => setFormData({ ...formData, telephoneCode: e.target.value })}
-                        >
-                          <option value="+44">+44</option>
-                          <option value="+1">+1</option>
-                          <option value="+90">+90</option>
-                          <option value="+49">+49</option>
-                        </select>
-                      </div>
-                      <Input
-                        id="telephone"
-                        name="telephone"
-                        type="tel"
-                        placeholder="(123) 456 67 87"
-                        value={formData.telephone}
-                        onChange={handleChange}
-                        required
-                        className="flex-1"
-                      />
-                    </div>
+                    <PhoneInput
+                      international
+                      defaultCountry="GB"
+                      value={formData.telephone}
+                      onChange={(value) => setFormData({ ...formData, telephone: value || "" })}
+                      className="phone-input"
+                      numberInputProps={{
+                        id: "telephone",
+                        name: "telephone",
+                        required: true,
+                      }}
+                    />
                   </div>
                 </div>
 

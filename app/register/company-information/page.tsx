@@ -11,6 +11,8 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { Trash2, Plus } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
+import PhoneInput from "react-phone-number-input";
+import "react-phone-number-input/style.css";
 
 export default function CompanyInformationPage() {
   const router = useRouter();
@@ -27,13 +29,11 @@ export default function CompanyInformationPage() {
     {
       businessName: "",
       ownerDirector: "",
-      ownerTelephone: "",
-      ownerTelephoneCode: "+1",
+      ownerTelephone: "", // PhoneInput formatında tam telefon numarası
       ownerEmail: "",
       differentContact: false,
       contactPerson: "",
-      contactTelephone: "",
-      contactTelephoneCode: "+1",
+      contactTelephone: "", // PhoneInput formatında tam telefon numarası
       contactEmail: "",
       // Address Information
       street: "",
@@ -50,13 +50,11 @@ export default function CompanyInformationPage() {
       {
         businessName: "",
         ownerDirector: "",
-        ownerTelephone: "",
-        ownerTelephoneCode: "+1",
+        ownerTelephone: "", // PhoneInput formatında tam telefon numarası
         ownerEmail: "",
         differentContact: false,
         contactPerson: "",
-        contactTelephone: "",
-        contactTelephoneCode: "+1",
+        contactTelephone: "", // PhoneInput formatında tam telefon numarası
         contactEmail: "",
         street: "",
         city: "",
@@ -319,6 +317,10 @@ export default function CompanyInformationPage() {
 
     // Update Lead in ERPNext (create if not exists)
     try {
+      console.log("=== COMPANY INFORMATION - HANDLE NEXT ===");
+      console.log("User Email:", userEmail);
+      console.log("Form Data CompanyInfo:", formData.companyInfo);
+      console.log("Businesses:", businesses);
       
       // companyInfo objesini temizle - sadece dolu alanları gönder
       const cleanCompanyInfo: any = {};
@@ -345,6 +347,9 @@ export default function CompanyInformationPage() {
       if (formData.companyInfo.federalState) cleanCompanyInfo.federalState = formData.companyInfo.federalState;
       if (formData.companyInfo.zipCode) cleanCompanyInfo.zipCode = formData.companyInfo.zipCode;
       
+      console.log("Clean CompanyInfo to send:", cleanCompanyInfo);
+      console.log("Businesses to send:", businesses);
+      console.log("Making fetch request to /api/erp/update-lead...");
       
       const res = await fetch("/api/erp/update-lead", {
         method: "POST",
@@ -358,15 +363,53 @@ export default function CompanyInformationPage() {
         }),
       });
 
+      console.log("Response status:", res.status);
+      console.log("Response ok:", res.ok);
+      
       const data = await res.json();
+      console.log("Response data:", data);
+      console.log("Address Creation Status:", data.addressCreationStatus);
 
       if (!res.ok || !data.success) {
+        console.error("Lead update failed - Response not OK or data.success is false");
+        console.error("Error:", data.error);
         alert(data.error || "Failed to update lead in ERP. Please try again.");
         return;
       }
+      
+      console.log("✅ Lead update successful!");
+      
+      // Address oluşturma durumunu kontrol et
+      if (data.addressCreationStatus) {
+        const addrStatus = data.addressCreationStatus;
+        
+        // Company Address durumu
+        if (addrStatus.companyAddress) {
+          if (addrStatus.companyAddress.success) {
+            console.log("✅ Company Address created successfully:", addrStatus.companyAddress.addressName);
+          } else {
+            console.error("❌ Company Address creation failed:", addrStatus.companyAddress.error);
+            alert(`Company Address creation failed: ${addrStatus.companyAddress.error}`);
+          }
+        }
+        
+        // Business Address'leri durumu
+        if (addrStatus.businessAddresses && addrStatus.businessAddresses.length > 0) {
+          addrStatus.businessAddresses.forEach((busAddr: any, index: number) => {
+            if (busAddr.success) {
+              console.log(`✅ Business Address ${index + 1} created successfully:`, busAddr.addressName);
+            } else {
+              console.error(`❌ Business Address ${index + 1} creation failed:`, busAddr.error);
+            }
+          });
+        }
+      } else {
+        console.warn("⚠️ Address creation status not found in response");
+      }
 
     } catch (error) {
-      console.error("Lead update failed:", error);
+      console.error("❌ Lead update failed with exception:", error);
+      console.error("Error details:", error instanceof Error ? error.message : error);
       alert("Failed to update lead in ERP. Please try again.");
       return;
     }
@@ -377,16 +420,6 @@ export default function CompanyInformationPage() {
     router.push("/register/services");
   };
 
-  // Function to get country flag emoji based on country code
-  function getCountryFlag(countryCode: string): string {
-    const flagMap: Record<string, string> = {
-      "+44": "🇬🇧", // United Kingdom
-      "+1": "🇺🇸", // United States
-      "+90": "🇹🇷", // Turkey
-      "+49": "🇩🇪", // Germany
-    };
-    return flagMap[countryCode] || "🇬🇧";
-  }
 
   const countries = ["Germany", "Turkey", "United Kingdom", "United States"];
   const states: Record<string, string[]> = {
@@ -590,30 +623,18 @@ export default function CompanyInformationPage() {
                       <Label htmlFor="ownerTelephone-0" className="text-sm font-semibold text-gray-700">
                         Telephone number <span className="text-red-500">*</span>
                       </Label>
-                      <div className="flex gap-2">
-                        <div className="flex items-center gap-1 px-3 border border-gray-300 rounded-md bg-white">
-                          <span className="text-xl">{getCountryFlag(businesses[0].ownerTelephoneCode)}</span>
-                          <select
-                            className="border-0 outline-none bg-transparent text-sm"
-                            value={businesses[0].ownerTelephoneCode}
-                            onChange={(e) => updateBusiness(0, "ownerTelephoneCode", e.target.value)}
-                          >
-                            <option value="+44">+44</option>
-                            <option value="+1">+1</option>
-                            <option value="+90">+90</option>
-                            <option value="+49">+49</option>
-                          </select>
-                        </div>
-                        <Input
-                          id="ownerTelephone-0"
-                          type="tel"
-                          placeholder="123 456 67 87"
-                          value={businesses[0].ownerTelephone}
-                          onChange={(e) => updateBusiness(0, "ownerTelephone", e.target.value)}
-                          required
-                          className="flex-1"
-                        />
-                      </div>
+                      <PhoneInput
+                        international
+                        defaultCountry="GB"
+                        value={businesses[0].ownerTelephone}
+                        onChange={(value) => updateBusiness(0, "ownerTelephone", value || "")}
+                        className="phone-input"
+                        numberInputProps={{
+                          id: "ownerTelephone-0",
+                          name: "ownerTelephone-0",
+                          required: true,
+                        }}
+                      />
                     </div>
                   </div>
 
@@ -671,30 +692,18 @@ export default function CompanyInformationPage() {
                           <Label htmlFor="contactTelephone-0" className="text-sm font-semibold text-gray-700">
                             Telephone number <span className="text-red-500">*</span>
                           </Label>
-                          <div className="flex gap-2">
-                            <div className="flex items-center gap-1 px-3 border border-gray-300 rounded-md bg-white">
-                              <span className="text-xl">{getCountryFlag(businesses[0].contactTelephoneCode)}</span>
-                              <select
-                                className="border-0 outline-none bg-transparent text-sm"
-                                value={businesses[0].contactTelephoneCode}
-                                onChange={(e) => updateBusiness(0, "contactTelephoneCode", e.target.value)}
-                              >
-                                <option value="+44">+44</option>
-                                <option value="+1">+1</option>
-                                <option value="+90">+90</option>
-                                <option value="+49">+49</option>
-                              </select>
-                            </div>
-                            <Input
-                              id="contactTelephone-0"
-                              type="tel"
-                              placeholder="123 456 67 87"
-                              value={businesses[0].contactTelephone}
-                              onChange={(e) => updateBusiness(0, "contactTelephone", e.target.value)}
-                              required
-                              className="flex-1"
-                            />
-                          </div>
+                          <PhoneInput
+                            international
+                            defaultCountry="GB"
+                            value={businesses[0].contactTelephone}
+                            onChange={(value) => updateBusiness(0, "contactTelephone", value || "")}
+                            className="phone-input"
+                            numberInputProps={{
+                              id: "contactTelephone-0",
+                              name: "contactTelephone-0",
+                              required: true,
+                            }}
+                          />
                         </div>
                       </div>
 
@@ -866,30 +875,18 @@ export default function CompanyInformationPage() {
                       <Label htmlFor={`ownerTelephone-${index}`} className="text-sm font-semibold text-gray-700">
                         Telephone number <span className="text-red-500">*</span>
                       </Label>
-                      <div className="flex gap-2">
-                        <div className="flex items-center gap-1 px-3 border border-gray-300 rounded-md bg-white">
-                          <span className="text-xl">{getCountryFlag(business.ownerTelephoneCode)}</span>
-                          <select
-                            className="border-0 outline-none bg-transparent text-sm"
-                            value={business.ownerTelephoneCode}
-                            onChange={(e) => updateBusiness(index, "ownerTelephoneCode", e.target.value)}
-                          >
-                            <option value="+44">+44</option>
-                            <option value="+1">+1</option>
-                            <option value="+90">+90</option>
-                            <option value="+49">+49</option>
-                          </select>
-                        </div>
-                        <Input
-                          id={`ownerTelephone-${index}`}
-                          type="tel"
-                          placeholder="123 456 67 87"
-                          value={business.ownerTelephone}
-                          onChange={(e) => updateBusiness(index, "ownerTelephone", e.target.value)}
-                          required
-                          className="flex-1"
-                        />
-                      </div>
+                      <PhoneInput
+                        international
+                        defaultCountry="GB"
+                        value={business.ownerTelephone}
+                        onChange={(value) => updateBusiness(index, "ownerTelephone", value || "")}
+                        className="phone-input"
+                        numberInputProps={{
+                          id: `ownerTelephone-${index}`,
+                          name: `ownerTelephone-${index}`,
+                          required: true,
+                        }}
+                      />
                     </div>
                   </div>
 
@@ -947,30 +944,18 @@ export default function CompanyInformationPage() {
                           <Label htmlFor={`contactTelephone-${index}`} className="text-sm font-semibold text-gray-700">
                             Telephone number <span className="text-red-500">*</span>
                           </Label>
-                          <div className="flex gap-2">
-                            <div className="flex items-center gap-1 px-3 border border-gray-300 rounded-md bg-white">
-                              <span className="text-xl">{getCountryFlag(business.contactTelephoneCode)}</span>
-                              <select
-                                className="border-0 outline-none bg-transparent text-sm"
-                                value={business.contactTelephoneCode}
-                                onChange={(e) => updateBusiness(index, "contactTelephoneCode", e.target.value)}
-                              >
-                                <option value="+44">+44</option>
-                                <option value="+1">+1</option>
-                                <option value="+90">+90</option>
-                                <option value="+49">+49</option>
-                              </select>
-                            </div>
-                            <Input
-                              id={`contactTelephone-${index}`}
-                              type="tel"
-                              placeholder="123 456 67 87"
-                              value={business.contactTelephone}
-                              onChange={(e) => updateBusiness(index, "contactTelephone", e.target.value)}
-                              required
-                              className="flex-1"
-                            />
-                          </div>
+                          <PhoneInput
+                            international
+                            defaultCountry="GB"
+                            value={business.contactTelephone}
+                            onChange={(value) => updateBusiness(index, "contactTelephone", value || "")}
+                            className="phone-input"
+                            numberInputProps={{
+                              id: `contactTelephone-${index}`,
+                              name: `contactTelephone-${index}`,
+                              required: true,
+                            }}
+                          />
                         </div>
                       </div>
 
