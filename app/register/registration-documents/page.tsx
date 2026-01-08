@@ -46,6 +46,7 @@ export default function RegistrationDocumentsPage() {
   const [documentData, setDocumentData] = useState<Record<string, DocumentData>>({});
   const [loadingCompanyTypes, setLoadingCompanyTypes] = useState(false);
   const [loadingDocuments, setLoadingDocuments] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
@@ -262,34 +263,135 @@ export default function RegistrationDocumentsPage() {
     router.push("/register/payment-information");
   };
 
+  // Önceki sayfalardaki bilgilerin tamamlanıp tamamlanmadığını kontrol et
+  const validatePreviousSteps = async (userEmail: string): Promise<{ isValid: boolean; missingFields: string[] }> => {
+    try {
+      const res = await fetch("/api/erp/get-lead", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email: userEmail }),
+      });
+
+      const data = await res.json();
+      if (!data.success || !data.lead) {
+        return { isValid: false, missingFields: ["Lead not found. Please complete registration from the beginning."] };
+      }
+
+      const lead = data.lead;
+      const missingFields: string[] = [];
+
+      // Step 1: Company Information kontrolü
+      if (!lead.company_name || lead.company_name.trim() === "") {
+        missingFields.push("Company Name (Company Information page)");
+      }
+      if (!lead.address_line1 && !lead.custom_address_line1) {
+        missingFields.push("Street Address (Company Information page)");
+      }
+      if (!lead.city || lead.city.trim() === "") {
+        missingFields.push("City (Company Information page)");
+      }
+      if (!lead.country || lead.country.trim() === "") {
+        missingFields.push("Country (Company Information page)");
+      }
+      if (!lead.pincode && !lead.custom_pincode) {
+        missingFields.push("Postal Code (Company Information page)");
+      }
+      const taxId = lead.custom_tax_id_number || lead.custom_custom_tax_id_number;
+      if (!taxId || taxId.trim() === "") {
+        missingFields.push("Tax ID Number (Company Information page)");
+      }
+
+      // Step 2: Company Representative kontrolü (Business Address'ler)
+      // En az bir business address olmalı
+      let hasBusinessAddress = false;
+      if (lead.businesses && Array.isArray(lead.businesses) && lead.businesses.length > 0) {
+        // Business'lerin en az birinde temel bilgiler olmalı
+        hasBusinessAddress = lead.businesses.some((b: any) => 
+          (b.businessName && b.businessName.trim() !== "") ||
+          (b.street && b.street.trim() !== "") ||
+          (b.city && b.city.trim() !== "")
+        );
+      }
+      // Business Address'leri kontrol et
+      if (!hasBusinessAddress) {
+        // Address DocType'ından kontrol et
+        if (lead.businesses && Array.isArray(lead.businesses) && lead.businesses.length > 0) {
+          // businesses array'inde bilgi varsa ama address yoksa, bu da geçerli
+          hasBusinessAddress = true;
+        }
+      }
+      // Not: Business address zorunlu değilse bu kontrolü atlayabiliriz
+      // Şimdilik business address'i opsiyonel bırakıyoruz
+
+      // Step 3: Payment Information kontrolü
+      if (!lead.custom_account_holder || lead.custom_account_holder.trim() === "") {
+        missingFields.push("Account Holder (Payment Information page)");
+      }
+      if (!lead.custom_iban || lead.custom_iban.trim() === "") {
+        missingFields.push("IBAN (Payment Information page)");
+      }
+      if (!lead.custom_bic || lead.custom_bic.trim() === "") {
+        missingFields.push("BIC (Payment Information page)");
+      }
+
+      // Step 4: Services kontrolü
+      const hasServices = lead.services && Array.isArray(lead.services) && lead.services.length > 0;
+      if (!hasServices) {
+        // Eski format kontrolü (backward compatibility)
+        const oldServices = lead.custom_selected_services;
+        if (!oldServices || oldServices === "[]" || oldServices === "") {
+          missingFields.push("At least one Service (Services page)");
+        }
+      }
+
+      return {
+        isValid: missingFields.length === 0,
+        missingFields,
+      };
+    } catch (error) {
+      console.error("Error validating previous steps:", error);
+      return { isValid: false, missingFields: ["Could not validate previous steps. Please try again."] };
+    }
+  };
+
   const handleSubmit = async () => {
     // Validation
     if (!selectedCompanyType) {
+      setError("Please select a company type before submitting documents.");
       alert("Please select a company type");
       return;
     }
 
     // Her required document için validation
+    const missingDocuments: string[] = [];
     for (const doc of requiredDocuments) {
       if (doc.isRequired) {
         if (doc.isDateField) {
           if (!documentData[doc.id]?.date) {
-            alert(`Please fill in ${doc.documentName}`);
-            return;
+            missingDocuments.push(doc.documentName);
           }
         } else {
           if (!documentData[doc.id]?.files || documentData[doc.id].files!.length === 0) {
-            alert(`Please upload ${doc.documentName}`);
-            return;
+            missingDocuments.push(doc.documentName);
           }
         }
       }
     }
 
-    // TODO: Upload files to server and save to Lead
-    // Şimdilik sadece console'a yazdır
+    if (missingDocuments.length > 0) {
+      const errorMessage = `Please upload/fill in the following required documents:\n\n${missingDocuments.map((doc, index) => `${index + 1}. ${doc}`).join("\n")}\n\nAll required documents must be uploaded before you can proceed.`;
+      setError(errorMessage);
+      alert(errorMessage);
+      return;
+    }
 
-    // Update Lead with documents
+    // Loading state'i aktif et
+    setSubmitting(true);
+    setError("");
+
+    // Get user email
     let userEmail = "";
     if (typeof window !== "undefined") {
       const sessionEmail = sessionStorage.getItem("userEmail");
@@ -310,6 +412,17 @@ export default function RegistrationDocumentsPage() {
 
     if (!userEmail) {
       alert("User email not found. Please login again.");
+      setSubmitting(false);
+      return;
+    }
+
+    // Önceki sayfalardaki bilgileri kontrol et
+    const validation = await validatePreviousSteps(userEmail);
+    if (!validation.isValid) {
+      setSubmitting(false);
+      const errorMessage = `Please complete all required fields from previous steps before submitting documents.\n\nMissing fields:\n${validation.missingFields.map((field, index) => `${index + 1}. ${field}`).join("\n")}\n\nPlease use the "Back" button to go back and complete these fields.`;
+      setError(errorMessage);
+      alert(errorMessage);
       return;
     }
 
@@ -317,9 +430,26 @@ export default function RegistrationDocumentsPage() {
       // File'ları FormData ile göndermek için hazırla
       const formDataToSend = new FormData();
       formDataToSend.append("email", userEmail);
+      
+      // documentData'dan File objelerini çıkar, sadece metadata'yı gönder
+      const serializableDocumentData: Record<string, { files?: { name: string }[]; date?: string }> = {};
+      Object.keys(documentData).forEach((docId) => {
+        const doc = documentData[docId];
+        if (doc.files && doc.files.length > 0) {
+          serializableDocumentData[docId] = {
+            files: doc.files.map(file => ({ name: file.name })),
+            date: doc.date,
+          };
+        } else if (doc.date) {
+          serializableDocumentData[docId] = {
+            date: doc.date,
+          };
+        }
+      });
+      
       formDataToSend.append("documents", JSON.stringify({
         typeOfCompany: selectedCompanyType,
-        documentData: documentData,
+        documentData: serializableDocumentData,
         isCompleted: true, // Tüm belgeler yüklendi
       }));
 
@@ -341,18 +471,33 @@ export default function RegistrationDocumentsPage() {
         body: formDataToSend,
       });
 
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ error: "Server error" }));
+        throw new Error(errorData.error || `HTTP ${res.status}`);
+      }
+
       const data = await res.json();
 
       if (data.success) {
         // Registration tamamlandı, dashboard'a yönlendir
-        alert("Registration completed successfully!");
+        // custom_registration_status = "Completed" olarak güncellenmiş olmalı
+        setError(""); // Clear any previous errors
+        alert("Registration completed successfully! Redirecting to dashboard...");
         router.push("/dashboard");
       } else {
-        alert(data.error || "Failed to save documents");
+        console.error("Update lead error:", data);
+        const errorMsg = data.error || "Failed to save documents";
+        setError(errorMsg);
+        alert(errorMsg);
       }
     } catch (error: any) {
       console.error("Error submitting documents:", error);
-      alert("Failed to submit documents. Please try again.");
+      console.error("Error details:", error.message, error.stack);
+      const errorMessage = error.message || "Please try again.";
+      setError(errorMessage);
+      alert(`Failed to submit documents: ${errorMessage}`);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -373,8 +518,9 @@ export default function RegistrationDocumentsPage() {
             </div>
 
             {error && (
-              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
-                {error}
+              <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+                <div className="font-semibold mb-2">⚠️ Please complete the following:</div>
+                <div className="whitespace-pre-line">{error}</div>
               </div>
             )}
 
@@ -395,7 +541,7 @@ export default function RegistrationDocumentsPage() {
                     {loadingCompanyTypes ? "Loading..." : "Select"}
                   </option>
                   {companyTypes.map((ct) => (
-                    <option key={ct.id} value={ct.name}>
+                    <option key={ct.id} value={ct.id}>
                       {ct.name}
                     </option>
                   ))}
@@ -541,8 +687,8 @@ export default function RegistrationDocumentsPage() {
                 >
                   Back
                 </Button>
-                <RegisterButton type="button" onClick={handleSubmit} disabled={!selectedCompanyType || requiredDocuments.length === 0}>
-                  Submit
+                <RegisterButton type="button" onClick={handleSubmit} disabled={!selectedCompanyType || requiredDocuments.length === 0 || submitting}>
+                  {submitting ? "Submitting..." : "Submit"}
                 </RegisterButton>
               </div>
             </form>
