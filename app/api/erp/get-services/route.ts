@@ -88,53 +88,25 @@ export async function GET(req: NextRequest) {
       if (imageField) {
         // ERPNext image path'i zaten tam path olabilir veya relative path olabilir
         if (typeof imageField === 'string') {
+          // ERPNext'teki /private/files/ dosyaları authentication gerektiriyor
+          // Bu yüzden proxy endpoint üzerinden geçiriyoruz
+          // Frontend'den /api/erp/proxy-image?url=... şeklinde çağrılacak
+          
+          let erpImagePath = imageField;
+          
+          // Tam URL ise path'i çıkar
           if (imageField.startsWith("http")) {
-            imageUrl = imageField;
-          } else if (imageField.startsWith("/")) {
-            // ERPNext'te image'ler genellikle /files/ veya /private/files/ altında
-            // /private/files/ için authentication gerekir, bu yüzden /files/ kullanıyoruz
-            if (imageField.startsWith("/private/files/")) {
-              // /private/files/ -> /files/ dönüştür (public erişim için)
-              const publicPath = imageField.replace("/private/files/", "/files/");
-              // Path'i parçalara ayır, sadece dosya adını encode et (path separator'ları koru)
-              const pathParts = publicPath.split('/');
-              const encodedParts = pathParts.map((part, index) => {
-                // İlk boş string ve path separator'ları koru, sadece dosya adını encode et
-                if (index === 0 || part === '') return part;
-                // Son kısım (dosya adı) encode edilmeli
-                if (index === pathParts.length - 1) {
-                  return encodeURIComponent(part);
-                }
-                return part;
-              });
-              imageUrl = `${baseUrl}${encodedParts.join('/')}`;
-            } else if (imageField.startsWith("/files/")) {
-              // Zaten /files/ altında, aynı mantıkla encode et
-              const pathParts = imageField.split('/');
-              const encodedParts = pathParts.map((part, index) => {
-                if (index === 0 || part === '') return part;
-                if (index === pathParts.length - 1) {
-                  return encodeURIComponent(part);
-                }
-                return part;
-              });
-              imageUrl = `${baseUrl}${encodedParts.join('/')}`;
-            } else {
-              // Diğer path'ler için de aynı mantık
-              const pathParts = imageField.split('/');
-              const encodedParts = pathParts.map((part, index) => {
-                if (index === 0 || part === '') return part;
-                if (index === pathParts.length - 1) {
-                  return encodeURIComponent(part);
-                }
-                return part;
-              });
-              imageUrl = `${baseUrl}${encodedParts.join('/')}`;
+            try {
+              const url = new URL(imageField);
+              erpImagePath = url.pathname;
+            } catch {
+              erpImagePath = imageField;
             }
-          } else {
-            // URL'deki boşlukları ve özel karakterleri encode et
-            imageUrl = `${baseUrl}/${encodeURI(imageField)}`;
           }
+          
+          // Proxy URL'i oluştur
+          // encodeURIComponent ile URL'i encode et (path içindeki özel karakterler için)
+          imageUrl = `/api/erp/proxy-image?url=${encodeURIComponent(erpImagePath)}`;
         }
       } else {
       }

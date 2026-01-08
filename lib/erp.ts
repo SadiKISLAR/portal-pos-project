@@ -135,7 +135,10 @@ export async function erpUploadFile(file: File, folder: string = "Home/Attachmen
     const formData = new FormData();
     formData.append('file', file);
     formData.append('folder', folder);
-    formData.append('is_private', '0'); // Public file (0) veya private file (1)
+    // ERPNext varsayılan olarak dosyaları private olarak yüklüyor
+    // is_private: 1 = /private/files/ altında (varsayılan)
+    // is_private: 0 = /files/ altında (public)
+    formData.append('is_private', '1'); // Private file - ERPNext'in varsayılan davranışı
     
     const headers: HeadersInit = {};
     
@@ -169,11 +172,16 @@ export async function erpUploadFile(file: File, folder: string = "Home/Attachmen
     }
     
     // ERPNext upload_file response formatı: { message: { file_url: "...", ... } }
+    // file_url zaten doğru path'i içeriyor (/private/files/ veya /files/)
     if (result?.message?.file_url) {
+      console.log(`File uploaded, URL from ERPNext: ${result.message.file_url}`);
       return result.message.file_url;
     } else if (result?.message?.file_name) {
-      // Eğer sadece file_name dönerse, URL'i oluştur
-      return `/files/${result.message.file_name}`;
+      // Eğer sadece file_name dönerse, private files URL'i oluştur
+      // ERPNext varsayılan olarak /private/files/ kullanıyor
+      const fileUrl = `/private/files/${result.message.file_name}`;
+      console.log(`File uploaded, constructed URL: ${fileUrl}`);
+      return fileUrl;
     } else if (result?.message) {
       // Başka bir format olabilir, message objesini kontrol et
       console.warn('Unexpected upload_file response format:', JSON.stringify(result.message));
@@ -188,6 +196,80 @@ export async function erpUploadFile(file: File, folder: string = "Home/Attachmen
   } catch (error: any) {
     const fileName = file instanceof File ? file.name : 'unknown';
     console.error(`Error in erpUploadFile for file ${fileName}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * ERPNext'te File kaydını Lead'e bağlar (Attach)
+ * upload_file zaten File kaydı oluşturur, sadece attached_to_doctype ve attached_to_name güncellenir
+ * @param fileUrl Upload edilen file'ın URL'i
+ * @param fileName Dosya adı (file_url'den çıkarılabilir)
+ * @param attachedToDoctype Bağlı olduğu DocType (örn: "Lead")
+ * @param attachedToName Bağlı olduğu kayıtın name'i (örn: Lead name)
+ * @param token API token
+ * @returns Güncellenen File kaydı
+ */
+export async function erpCreateAttach(
+  fileUrl: string,
+  fileName: string,
+  attachedToDoctype: string,
+  attachedToName: string,
+  token?: string
+): Promise<any> {
+  try {
+    // fileUrl'den file_name'i çıkar (örn: /files/document.pdf -> document.pdf)
+    // Eğer fileName verilmişse onu kullan, yoksa fileUrl'den çıkar
+    const actualFileName = fileName || fileUrl.split('/').pop() || 'unknown';
+    
+    // Önce File kaydını bul (file_url veya file_name ile)
+    let fileRecord = null;
+    try {
+      // file_url ile ara
+      const fileUrlFilters = encodeURIComponent(JSON.stringify([["file_url", "=", fileUrl]]));
+      const fileResult = await erpGet(`/api/resource/File?filters=${fileUrlFilters}&limit_page_length=1`, token);
+      const files = fileResult?.data || (Array.isArray(fileResult) ? fileResult : []);
+      
+      if (Array.isArray(files) && files.length > 0) {
+        fileRecord = files[0];
+      } else {
+        // file_name ile ara
+        const fileNameFilters = encodeURIComponent(JSON.stringify([["file_name", "=", actualFileName]]));
+        const fileNameResult = await erpGet(`/api/resource/File?filters=${fileNameFilters}&limit_page_length=1`, token);
+        const filesByName = fileNameResult?.data || (Array.isArray(fileNameResult) ? fileNameResult : []);
+        
+        if (Array.isArray(filesByName) && filesByName.length > 0) {
+          fileRecord = filesByName[0];
+        }
+      }
+    } catch (searchError: any) {
+      console.warn(`Could not find existing File record:`, searchError.message);
+    }
+    
+    if (fileRecord && fileRecord.name) {
+      // Mevcut File kaydını güncelle
+      const updatePayload = {
+        attached_to_doctype: attachedToDoctype,
+        attached_to_name: attachedToName,
+      };
+      
+      const result = await erpPut(`/api/resource/File/${encodeURIComponent(fileRecord.name)}`, updatePayload, token);
+      return result;
+    } else {
+      // File kaydı bulunamadı, yeni oluştur
+      const attachPayload = {
+        file_name: actualFileName,
+        file_url: fileUrl,
+        attached_to_doctype: attachedToDoctype,
+        attached_to_name: attachedToName,
+        is_private: 1, // Private file - ERPNext varsayılan davranışı (/private/files/)
+      };
+
+      const result = await erpPost("/api/resource/File", attachPayload, token);
+      return result;
+    }
+  } catch (error: any) {
+    console.error(`Error creating/updating Attach for ${fileName}:`, error);
     throw error;
   }
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { erpGet, erpPost, erpPut, erpUploadFile } from "@/lib/erp";
+import { erpGet, erpPost, erpPut, erpUploadFile, erpCreateAttach } from "@/lib/erp";
 
 /**
  * Bu API endpoint'i Lead'i bulur ve günceller, yoksa oluşturur.
@@ -18,8 +18,9 @@ export async function POST(req: NextRequest) {
     let uploadedFiles: Record<string, File[]> = {};
 
     if (contentType.includes("multipart/form-data")) {
-      // Parse FormData
-      const formData = await req.formData();
+      try {
+        // Parse FormData
+        const formData = await req.formData();
       
       email = formData.get("email") as string || "";
       
@@ -56,7 +57,10 @@ export async function POST(req: NextRequest) {
         try {
           documents = JSON.parse(documentsStr);
         } catch (e) {
-          console.warn("Error parsing documents:", e);
+          console.error("Error parsing documents:", e);
+          console.error("documentsStr content:", documentsStr.substring(0, 500));
+          // Hata durumunda boş obje kullan
+          documents = null;
         }
       }
 
@@ -79,8 +83,25 @@ export async function POST(req: NextRequest) {
               uploadedFiles[docId] = [];
             }
             uploadedFiles[docId].push(value);
+          } else {
+            // Debug: Eşleşmeyen file key'lerini logla
+            console.log(`File key doesn't match pattern: ${key}`);
           }
         }
+      }
+      
+      // Debug: Toplanan file'ları logla
+      if (Object.keys(uploadedFiles).length > 0) {
+        console.log(`Collected ${Object.keys(uploadedFiles).length} document types with files`);
+        Object.entries(uploadedFiles).forEach(([docId, files]) => {
+          console.log(`  - ${docId}: ${files.length} file(s)`);
+        });
+      }
+      } catch (formDataError: any) {
+        console.error("Error parsing FormData:", formDataError);
+        console.error("FormData error message:", formDataError?.message);
+        console.error("FormData error stack:", formDataError?.stack);
+        throw new Error(`Failed to parse FormData: ${formDataError?.message || "Unknown error"}`);
       }
     } else {
       // Parse JSON body (backward compatibility)
@@ -93,7 +114,14 @@ export async function POST(req: NextRequest) {
       services = body.services || null;
     }
 
+    console.log("Processing update-lead request");
+    console.log("Email:", email || "NOT PROVIDED");
+    console.log("Content-Type:", contentType);
+    console.log("Has documents:", !!documents);
+    console.log("Uploaded files count:", Object.keys(uploadedFiles).length);
+
     if (!email) {
+      console.error("Email is missing in request");
       return NextResponse.json(
         { error: "Email is required to find user" },
         { status: 400 }
@@ -329,47 +357,69 @@ export async function POST(req: NextRequest) {
     // Documents (varsa) - Dinamik belge yönetimi
     if (documents) {
       if (documents.typeOfCompany) {
+        // Company Type ID'sinden name'i çek
+        // ERPNext Link field ID bekler, ama görüntüleme için name de lazım
         leadPayload.custom_type_of_company = documents.typeOfCompany;
+        
+        // Company Type name'ini çek ve ayrı bir alana kaydet
+        try {
+          const companyTypeResult = await erpGet(
+            `/api/resource/Company Type/${encodeURIComponent(documents.typeOfCompany)}`,
+            token
+          );
+          const companyTypeData = companyTypeResult?.data || companyTypeResult;
+          
+          if (companyTypeData) {
+            // Display name'i bul (custom_company_type_name veya company_type_name veya name)
+            const companyTypeName = companyTypeData.custom_company_type_name || 
+                                   companyTypeData.company_type_name || 
+                                   companyTypeData.name || 
+                                   documents.typeOfCompany;
+            // Name'i ayrı bir alana kaydet (ERPNext'te görüntüleme için)
+            leadPayload.custom_type_of_company_name = companyTypeName;
+          }
+        } catch (companyTypeError: any) {
+          console.warn("Could not fetch Company Type name:", companyTypeError.message);
+          // Name alınamazsa ID'yi kullan
+          leadPayload.custom_type_of_company_name = documents.typeOfCompany;
+        }
       }
 
       // Yeni dinamik belge sistemi
-      // Not: File upload şimdilik devre dışı, sadece file name'leri kaydediliyor
-      if (documents.documentData) {
-        const documentDataToSave: Record<string, any> = {};
-        
-        // Uploaded files'dan file name'leri al (FormData'dan gelen file'lar)
-        const fileNamesByDocId: Record<string, string[]> = {};
-        if (uploadedFiles && Object.keys(uploadedFiles).length > 0) {
-          for (const [docId, files] of Object.entries(uploadedFiles)) {
-            if (files && files.length > 0) {
-              fileNamesByDocId[docId] = files.map(f => f.name);
+      // Not: Dosyalar Lead oluşturulduktan sonra upload edilecek
+      // Bu yüzden şimdilik sadece date field'larını kaydet, file'lar upload edildikten sonra güncellenecek
+      if (documents.documentData && typeof documents.documentData === 'object') {
+        try {
+          // Düz metin formatında özet oluştur
+          let documentSummary = "📎 Documents pending upload...\n\n";
+          
+          for (const [docId, docData] of Object.entries(documents.documentData)) {
+            const data = docData as { files?: any[]; date?: string };
+            
+            // Belge başlığı (docId'yi okunabilir formata çevir)
+            const docTitle = docId.replace(/_/g, " ").replace(/-/g, " ");
+            
+            // Eğer date varsa veya file varsa kaydet
+            if (data.date || (uploadedFiles[docId] && uploadedFiles[docId].length > 0)) {
+              if (uploadedFiles[docId] && uploadedFiles[docId].length > 0) {
+                documentSummary += `⏳ ${docTitle}: ${uploadedFiles[docId].length} file(s) uploading...\n`;
+              }
+              
+              if (data.date) {
+                documentSummary += `📅 ${docTitle}: ${data.date}\n`;
+              }
             }
           }
-        }
-        
-        for (const [docId, docData] of Object.entries(documents.documentData)) {
-          const data = docData as { files?: any[]; date?: string };
           
-          // File name'leri önce uploadedFiles'dan al, yoksa documentData'dan al
-          const fileNames = fileNamesByDocId[docId] || 
-                           (data.files && data.files.length > 0 ? data.files.map((file: any) => file.name || file) : []);
-          
-          if (fileNames.length > 0) {
-            documentDataToSave[docId] = {
-              files: fileNames, // File name'leri kaydet (şimdilik URL yerine)
-              date: data.date || null,
-            };
-          } else if (data.date) {
-            documentDataToSave[docId] = {
-              files: [],
-              date: data.date,
-            };
+          // Düz metin formatında kaydet (dosya upload'dan sonra güncellenecek)
+          if (documentSummary) {
+            leadPayload.custom_document_data = documentSummary;
           }
+        } catch (docDataError: any) {
+          console.error("Error processing documentData:", docDataError);
+          console.error("documents.documentData:", JSON.stringify(documents.documentData, null, 2));
+          // Hata olsa bile devam et, sadece documentData'yı kaydetme
         }
-        
-        // Tüm belge verilerini JSON olarak kaydet
-        // Not: ERPNext'te field type'ı "Long Text" veya "Small Text" olmalı (JSON string için)
-        leadPayload.custom_document_data = JSON.stringify(documentDataToSave);
       }
 
       // Backward compatibility - eski field'lar
@@ -456,65 +506,84 @@ export async function POST(req: NextRequest) {
         leadPayload.services = servicesChildTable;
         
         // Service name'lerini de kaydet (görüntüleme için)
+        // NOT: JSON formatı yerine virgülle ayrılmış düz metin kullanıyoruz (ERPNext'te okunabilir olması için)
         if (serviceNames.length > 0) {
+          // Virgülle ayrılmış service name'leri (okunabilir format)
           leadPayload.custom_selected_service_names = serviceNames.join(", ");
-          // custom_selected_services field'ına da name'leri kaydet (ERPNext'te görüntüleme için)
-          leadPayload.custom_selected_services = JSON.stringify(serviceNames);
+          // custom_selected_services alanına da aynı okunabilir formatı kaydet
+          leadPayload.custom_selected_services = serviceNames.join(", ");
         } else {
-          // Service name'leri alınamadıysa ID'leri kaydet (fallback)
-          leadPayload.custom_selected_services = JSON.stringify(services);
+          // Service name'leri alınamadıysa ID'leri virgülle ayrılmış olarak kaydet (fallback)
+          leadPayload.custom_selected_services = services.join(", ");
+          leadPayload.custom_selected_service_names = services.join(", ");
         }
       } else {
         // Boş array - tüm servisleri kaldır
         leadPayload.services = [];
         leadPayload.custom_selected_service_names = "";
-        leadPayload.custom_selected_services = "[]";
+        leadPayload.custom_selected_services = "";
       }
     }
 
     // Lead'i oluştur veya güncelle
+    console.log("Preparing to create/update Lead");
+    console.log("Existing Lead:", existingLead ? existingLead.name : "None");
+    console.log("Lead payload keys:", Object.keys(leadPayload));
+    
     let leadResult;
-    if (existingLead && existingLead.name) {
+    try {
+      if (existingLead && existingLead.name) {
         // Mevcut Lead'i güncelle
         // PUT için name field'ını kaldır (path'te zaten var)
         const { name, ...updatePayload } = leadPayload;
         
-        
+        console.log(`Updating Lead: ${existingLead.name}`);
         leadResult = await erpPut(`/api/resource/Lead/${encodeURIComponent(existingLead.name)}`, updatePayload, token);
+        console.log("Lead updated successfully");
       } else {
         // Yeni Lead oluştur
         // Yeni Lead oluştururken name field'ını gönderme (ERPNext otomatik oluşturur)
         const { name, ...createPayload } = leadPayload;
         
-        
+        console.log("Creating new Lead");
         try {
           leadResult = await erpPost("/api/resource/Lead", createPayload, token);
-      } catch (createError: any) {
-        // Eğer duplicate error alırsak (email zaten kullanılıyorsa), Lead'i tekrar bul ve güncelle
-        if (createError.message?.includes("Email Address must be unique") || createError.message?.includes("DuplicateEntryError")) {
-          
-          // Lead'i tekrar bul
-          const leadFilters = encodeURIComponent(JSON.stringify([["email_id", "=", email]]));
-          const leadFields = encodeURIComponent(JSON.stringify(["name", "email_id"]));
-          const retryLeadResult = await erpGet(
-            `/api/resource/Lead?filters=${leadFilters}&fields=${leadFields}`,
-            token
-          );
+          console.log("Lead created successfully");
+        } catch (createError: any) {
+          console.error("Error creating Lead:", createError);
+          console.error("Create error message:", createError?.message);
+          // Eğer duplicate error alırsak (email zaten kullanılıyorsa), Lead'i tekrar bul ve güncelle
+          if (createError.message?.includes("Email Address must be unique") || createError.message?.includes("DuplicateEntryError")) {
+            console.log("Duplicate Lead detected, trying to update existing Lead");
+            // Lead'i tekrar bul
+            const leadFilters = encodeURIComponent(JSON.stringify([["email_id", "=", email]]));
+            const leadFields = encodeURIComponent(JSON.stringify(["name", "email_id"]));
+            const retryLeadResult = await erpGet(
+              `/api/resource/Lead?filters=${leadFilters}&fields=${leadFields}`,
+              token
+            );
 
-          const retryLeads = retryLeadResult?.data || (Array.isArray(retryLeadResult) ? retryLeadResult : []);
-          if (Array.isArray(retryLeads) && retryLeads.length > 0) {
-            const foundLead = retryLeads[0];
-            const { name, ...updatePayload } = leadPayload;
-            leadResult = await erpPut(`/api/resource/Lead/${encodeURIComponent(foundLead.name)}`, updatePayload, token);
+            const retryLeads = retryLeadResult?.data || (Array.isArray(retryLeadResult) ? retryLeadResult : []);
+            if (Array.isArray(retryLeads) && retryLeads.length > 0) {
+              const foundLead = retryLeads[0];
+              const { name, ...updatePayload } = leadPayload;
+              leadResult = await erpPut(`/api/resource/Lead/${encodeURIComponent(foundLead.name)}`, updatePayload, token);
+              console.log("Lead updated after duplicate detection");
+            } else {
+              // Bulamadıysak hatayı fırlat
+              throw createError;
+            }
           } else {
-            // Bulamadıysak hatayı fırlat
+            // Başka bir hata ise fırlat
             throw createError;
           }
-        } else {
-          // Başka bir hata ise fırlat
-          throw createError;
         }
       }
+    } catch (leadError: any) {
+      console.error("Critical error in Lead create/update:", leadError);
+      console.error("Lead error message:", leadError?.message);
+      console.error("Lead error stack:", leadError?.stack);
+      throw leadError;
     }
 
     const updatedLead = leadResult?.data || leadResult;
@@ -1133,10 +1202,11 @@ export async function POST(req: NextRequest) {
     }
 
     // File upload işlemi (Lead oluşturulduktan sonra)
-    // NOT: File upload şimdilik devre dışı, sadece file name'leri kaydediyoruz
-    // File upload'ı daha sonra aktif edeceğiz
-    if (false && uploadedFiles && Object.keys(uploadedFiles).length > 0 && documents?.documentData) {
+    // Dosyaları ERPNext'e upload et ve Attach olarak kaydet
+    // Ayrıca sadece date field'ları olan belgeleri de kaydet
+    if ((uploadedFiles && Object.keys(uploadedFiles).length > 0) || documents?.documentData) {
       try {
+        console.log("Starting file upload process...");
         const documentDataToUpdate: Record<string, any> = {};
         
         // Mevcut document data'yı parse et (eğer varsa)
@@ -1149,18 +1219,47 @@ export async function POST(req: NextRequest) {
           }
         }
         
-        // Her belge için file'ları upload et
-        for (const [docId, files] of Object.entries(uploadedFiles)) {
-          if (files && files.length > 0) {
+        // Her belge için file'ları upload et (eğer varsa)
+        if (uploadedFiles && Object.keys(uploadedFiles).length > 0) {
+          for (const [docId, files] of Object.entries(uploadedFiles)) {
+            if (files && files.length > 0) {
+            console.log(`Uploading ${files.length} file(s) for document ${docId}...`);
             const uploadedFileUrls: string[] = [];
             
             // Her file'ı upload et
-            for (const file of files) {
+            for (let i = 0; i < files.length; i++) {
+              const file = files[i];
               try {
                 // Folder path: Home/Attachments/Lead/{LeadName}/{DocumentId}
                 const folderPath = `Home/Attachments/Lead/${leadName}/${docId}`;
+                console.log(`Uploading file ${i + 1}/${files.length}: ${file.name} to ${folderPath}`);
+                
+                // 1. Dosyayı upload et
                 const fileUrl = await erpUploadFile(file, folderPath, token);
-                uploadedFileUrls.push(fileUrl);
+                console.log(`File uploaded successfully: ${fileUrl}`);
+                
+                // 2. Attach kaydı oluştur (Lead'e bağla)
+                try {
+                  await erpCreateAttach(
+                    fileUrl,
+                    file.name,
+                    "Lead",
+                    leadName,
+                    token
+                  );
+                  console.log(`Attach record created/updated for ${file.name}`);
+                  
+                  uploadedFileUrls.push(fileUrl);
+                } catch (attachError: any) {
+                  console.error(`Error creating Attach for ${file.name}:`, attachError);
+                  // Attach oluşturulamazsa bile file URL'ini kaydet
+                  uploadedFileUrls.push(fileUrl);
+                }
+                
+                // Her dosya upload'ından sonra kısa bekleme (ERPNext'in işlemesi için)
+                if (i < files.length - 1) {
+                  await new Promise(resolve => setTimeout(resolve, 500));
+                }
               } catch (uploadError: any) {
                 console.error(`Error uploading file ${file.name} for document ${docId}:`, uploadError);
                 console.error(`Error message:`, uploadError.message);
@@ -1170,17 +1269,22 @@ export async function POST(req: NextRequest) {
             }
             
             // Document data'yı güncelle
-            const existingDocData = existingDocumentData[docId] || documents.documentData[docId] || {};
+            // Not: File'lar artık Attach olarak kaydedildi, sadece referans olarak URL'leri saklıyoruz
+            const existingDocData = existingDocumentData[docId] || (documents?.documentData?.[docId] || {});
             documentDataToUpdate[docId] = {
               files: uploadedFileUrls.length > 0 ? uploadedFileUrls : (existingDocData.files || []),
               fileNames: files.map(f => f.name), // Original file names
-              date: existingDocData.date || null,
+              date: existingDocData.date || (documents?.documentData?.[docId]?.date || null),
+              // Attach kayıtları ERPNext'te otomatik olarak Lead'e bağlı, burada sadece referans tutuyoruz
             };
+            
+            console.log(`Document ${docId} updated with ${uploadedFileUrls.length} file(s)`);
+          }
           }
         }
         
-        // Date field'ları da ekle (file olmayan belgeler için)
-        if (documents.documentData) {
+        // Date field'ları da ekle (file olmayan belgeler için veya file'lı belgelerde date eksikse)
+        if (documents?.documentData) {
           for (const [docId, docData] of Object.entries(documents.documentData)) {
             const data = docData as { files?: any[]; date?: string };
             
@@ -1190,9 +1294,11 @@ export async function POST(req: NextRequest) {
                 files: [],
                 date: data.date,
               };
-            } else if (documentDataToUpdate[docId] && data.date) {
-              // File upload yapıldıysa ama date de varsa, date'i ekle
-              documentDataToUpdate[docId].date = data.date;
+            } else if (documentDataToUpdate[docId]) {
+              // File upload yapıldıysa, date'i ekle (varsa)
+              if (data.date && !documentDataToUpdate[docId].date) {
+                documentDataToUpdate[docId].date = data.date;
+              }
             }
           }
         }
@@ -1200,18 +1306,51 @@ export async function POST(req: NextRequest) {
         // Document data'yı Lead'e kaydet
         if (Object.keys(documentDataToUpdate).length > 0) {
           const finalDocumentData = { ...existingDocumentData, ...documentDataToUpdate };
+          console.log("Updating Lead with document data...");
+          
+          // Dosyalar zaten Attach olarak Lead'e bağlı
+          // custom_document_data alanına sadece özet bilgi yaz (düz metin formatında)
+          // Dosyaları görmek için Lead'in Attachments bölümüne bakılmalı
+          
+          let documentSummary = "📎 Uploaded Documents:\n\n";
+          for (const [docId, docData] of Object.entries(finalDocumentData)) {
+            const data = docData as { files?: string[]; fileNames?: string[]; date?: string };
+            
+            // Belge başlığı (docId'yi okunabilir formata çevir)
+            const docTitle = docId.replace(/_/g, " ").replace(/-/g, " ");
+            
+            // Dosya sayısı
+            const fileCount = data.files?.length || 0;
+            const fileNames = data.fileNames || [];
+            
+            if (fileCount > 0) {
+              documentSummary += `✅ ${docTitle}:\n`;
+              fileNames.forEach((name, i) => {
+                documentSummary += `   • ${name}\n`;
+              });
+            } else if (data.date) {
+              documentSummary += `✅ ${docTitle}: ${data.date}\n`;
+            }
+            
+            documentSummary += "\n";
+          }
+          
+          documentSummary += "ℹ️ See 'Attachments' section below for file links.";
+          
           await erpPut(
             `/api/resource/Lead/${encodeURIComponent(leadName)}`,
-            { custom_document_data: JSON.stringify(finalDocumentData) },
+            { custom_document_data: documentSummary },
             token
           );
+          console.log("Lead updated with document data successfully");
         }
       } catch (fileUploadError: any) {
         console.error("Error uploading files:", fileUploadError);
         console.error("Error message:", fileUploadError.message);
         console.error("Error stack:", fileUploadError.stack);
         // File upload hatası Lead'i etkilemesin, sadece log'layalım
-        // Kullanıcıya hata mesajı gösterilmez, çünkü Lead zaten oluşturuldu
+        // Ama kullanıcıya bilgi verelim
+        throw new Error(`File upload failed: ${fileUploadError.message || "Unknown error"}`);
       }
     }
 
@@ -1222,13 +1361,20 @@ export async function POST(req: NextRequest) {
       addressCreationStatus: addressCreationStatus,
     });
   } catch (e: any) {
-    console.error("ERP lead update/create error:", e);
+    console.error("========== ERP lead update/create error ==========");
     console.error("Error type:", typeof e);
+    console.error("Error name:", e?.name);
     console.error("Error message:", e?.message);
     console.error("Error stack:", e?.stack);
     
+    // Eğer response varsa, onu da log'la
+    if (e?.response) {
+      console.error("Error response:", e.response);
+    }
+    
     // ERPNext'ten gelen hata mesajını parse et
     let errorMessage = "Failed to update/create lead in ERP";
+    let errorDetails: any = {};
     
     if (typeof e?.message === "string") {
       errorMessage = e.message;
@@ -1237,17 +1383,33 @@ export async function POST(req: NextRequest) {
       if (e.message.includes("BrokenPipeError") || e.message.includes("Broken pipe")) {
         errorMessage = "Server connection error. Please try again or reduce the file size.";
       }
+      
+      // JSON parse hatası kontrolü
+      if (e.message.includes("JSON") && e.message.includes("parse")) {
+        errorMessage = "Invalid data format. Please check your input.";
+        errorDetails.parseError = true;
+      }
+      
+      // FormData hatası kontrolü
+      if (e.message.includes("FormData") || e.message.includes("multipart")) {
+        errorMessage = "File upload error. Please check file sizes and formats.";
+        errorDetails.formDataError = true;
+      }
     }
     
-    // Eğer response varsa, onu da log'la
-    if (e?.response) {
-      console.error("Error response:", e.response);
+    // Development modunda daha fazla detay göster
+    if (process.env.NODE_ENV === "development") {
+      errorDetails.fullError = e?.message;
+      errorDetails.stack = e?.stack;
     }
+    
+    console.error("Returning error response:", errorMessage);
+    console.error("================================================");
     
     return NextResponse.json(
       {
         error: errorMessage,
-        details: process.env.NODE_ENV === "development" ? e?.message : undefined,
+        details: Object.keys(errorDetails).length > 0 ? errorDetails : undefined,
       },
       { status: 500 }
     );
