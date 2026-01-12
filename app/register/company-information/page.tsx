@@ -13,28 +13,20 @@ import { Trash2, Plus } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import PhoneInput, { Country } from "react-phone-number-input";
 import "react-phone-number-input/style.css";
-
-// --- Ülke Kodu Kütüphaneleri ---
 import countries from "i18n-iso-countries";
 import en from "i18n-iso-countries/langs/en.json";
 import tr from "i18n-iso-countries/langs/tr.json";
 import de from "i18n-iso-countries/langs/de.json";
 
-// Dilleri tanıtıyoruz
 countries.registerLocale(en);
 countries.registerLocale(tr);
 countries.registerLocale(de);
 
-// Yardımcı Fonksiyon: Ülke isminden ISO Kodu (Alpha-2) bulur
-// Örnek: "Turkey" -> "TR", "Almanya" -> "DE"
-// Bulamazsa undefined döner (Böylece fallback mantığı kurabiliriz)
 const getCountryIsoCode = (countryName?: string): Country | undefined => {
   if (!countryName) return undefined;
-  
   const code = countries.getAlpha2Code(countryName, "en") || 
                countries.getAlpha2Code(countryName, "tr") ||
                countries.getAlpha2Code(countryName, "de");
-               
   return code as Country;
 };
 
@@ -46,9 +38,6 @@ export default function CompanyInformationPage() {
   );
   const hasLoadedCompanyInfo = useRef(false);
   const lastSelectedStreetRef = useRef<string | null>(null);
-  
-  // Ana Şirketin Ülke Kodunu hesapla (Varsayılan: Almanya 'DE' veya İngiltere 'GB')
-  // Bu kod, yeni eklenen Business'larda varsayılan telefon kodu olacak.
   const companyMainIso = getCountryIsoCode(formData.companyInfo.country) || "DE";
 
   const [businesses, setBusinesses] = useState([
@@ -85,7 +74,7 @@ export default function CompanyInformationPage() {
         city: "",
         postalCode: "",
         federalState: "",
-        country: "", // Boş geldiğinde companyMainIso kullanılacak
+        country: "",
       },
     ]);
   };
@@ -121,6 +110,7 @@ export default function CompanyInformationPage() {
     });
   };
 
+  // DÜZELTME: useEffect dependency uyarısı için disable eklendi
   useEffect(() => {
     if (formData.currentStep !== 1) {
       goToStep(1);
@@ -138,7 +128,9 @@ export default function CompanyInformationPage() {
       });
       updateFormData({ restaurants: newRestaurants });
     }
-  }, [restaurantCount, formData.currentStep, formData.restaurants.length, goToStep, updateFormData]);
+    // Sonsuz döngüyü önlemek için formData.restaurants dependency array'e eklenmemeli
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [restaurantCount, formData.currentStep, goToStep, updateFormData]);
 
   useEffect(() => {
     if (hasLoadedCompanyInfo.current) {
@@ -553,11 +545,8 @@ function renderBusinessForm(
   business: any, 
   updateBusiness: any, 
   updateBusinessAddress: any,
-  defaultCompanyIso: Country // Yeni Prop: Şirket Ülkesi (Fallback)
+  defaultCompanyIso: Country 
 ) {
-  // 1. İşletme ülkesi seçiliyse onu kullan
-  // 2. Seçili değilse Ana Şirket Ülkesini kullan
-  // 3. O da yoksa Almanya (DE) kullan
   const currentCountryIso = getCountryIsoCode(business.country) || defaultCompanyIso;
 
   return (
@@ -593,10 +582,6 @@ function renderBusinessForm(
           <Label htmlFor={`ownerTelephone-${index}`} className="text-sm font-semibold text-gray-700">
             Telephone number <span className="text-red-500">*</span>
           </Label>
-          {/* KEY ÖZELLİĞİ EKLENDİ: 
-             key={currentCountryIso} sayesinde ülke kodu her değiştiğinde 
-             bileşen yeniden render olur ve yeni bayrak anında gelir.
-          */}
           <PhoneInput
             international
             key={currentCountryIso} 
@@ -663,7 +648,6 @@ function renderBusinessForm(
               <Label htmlFor={`contactTelephone-${index}`} className="text-sm font-semibold text-gray-700">
                 Telephone number <span className="text-red-500">*</span>
               </Label>
-              {/* Contact Person için de aynı dinamik Key ve DefaultCountry uygulandı */}
               <PhoneInput
                 international
                 key={currentCountryIso}
@@ -697,7 +681,6 @@ function renderBusinessForm(
         </div>
       )}
 
-      {/* --- Business Address Section --- */}
       <div className="space-y-6 border-t pt-6">
         <h2 className="text-lg font-semibold text-gray-800">Business {index + 1} Address Information</h2>
 

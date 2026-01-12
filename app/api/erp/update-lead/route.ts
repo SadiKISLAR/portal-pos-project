@@ -11,10 +11,9 @@ export async function POST(req: NextRequest) {
     let businesses: any = null;
     let paymentInfo: any = null;
     let documents: any = null;
-    let services: any = null; // ID Listesi: ["id1", "id2"]
+    let services: any = null;
     let uploadedFiles: Record<string, File[]> = {};
 
-    // 1. Veri Ayrıştırma
     if (contentType.includes("multipart/form-data")) {
         const formData = await req.formData();
         email = formData.get("email") as string || "";
@@ -50,7 +49,6 @@ export async function POST(req: NextRequest) {
     const token = process.env.ERP_API_TOKEN;
     if (!token) return NextResponse.json({ error: "Token missing" }, { status: 500 });
 
-    // 2. User/Lead Bulma
     let existingLead = null;
     try {
         const filters = encodeURIComponent(JSON.stringify([["email_id", "=", email]]));
@@ -59,7 +57,6 @@ export async function POST(req: NextRequest) {
         if (data.length > 0) existingLead = data[0];
     } catch(e) {}
 
-    // 3. Payload Hazırlama
     const leadPayload: any = {
         email_id: email,
         company_name: companyInfo?.companyName || existingLead?.company_name || email,
@@ -70,7 +67,6 @@ export async function POST(req: NextRequest) {
         leadPayload.status = "Open";
     }
 
-    // Company Info, Payment vb. (Kısaltıldı, standart atamalar)
     if (companyInfo) {
         if (companyInfo.companyName) leadPayload.company_name = companyInfo.companyName;
         if (companyInfo.vatIdentificationNumber) leadPayload.custom_vat_identification_number = companyInfo.vatIdentificationNumber;
@@ -95,19 +91,14 @@ export async function POST(req: NextRequest) {
         if (paymentInfo.bic) leadPayload.custom_bic = paymentInfo.bic;
     }
 
-    // --- SERVİSLERİ İŞLEME (ID -> İSİM) ---
     if (services && Array.isArray(services)) {
         let serviceNamesList: string[] = [];
-        
         try {
-            // ID'lerden İsimleri Bulmak için ERP'yi sorgula
-            // Filtre: ID'si (name) bizim listemizde olanlar
             const idsJson = JSON.stringify(services);
             const filters = `[["name", "in", ${idsJson}]]`;
             const fields = `["name", "service_name", "title"]`;
             
             let serviceData = [];
-            // Önce 'Service', olmazsa 'Services' doctype dene
             try {
                 const res = await erpGet(`/api/resource/Service?filters=${encodeURIComponent(filters)}&fields=${encodeURIComponent(fields)}`, token);
                 serviceData = res?.data || (Array.isArray(res) ? res : []);
@@ -116,38 +107,28 @@ export async function POST(req: NextRequest) {
                 serviceData = res?.data || (Array.isArray(res) ? res : []);
             }
 
-            // ID -> İsim Haritası oluştur
             const idMap = new Map();
             serviceData.forEach((s: any) => {
-                // service_name, title veya name(id) hangisi varsa onu kullan
                 const name = s.service_name || s.title || s.name;
                 idMap.set(s.name, name);
             });
-
-            // Orijinal sırayı bozmadan isim listesini oluştur
             serviceNamesList = services.map((id: string) => idMap.get(id) || id);
 
         } catch (e) {
-            console.warn("Service lookup failed, using IDs as names:", e);
+            console.warn("Service lookup failed", e);
             serviceNamesList = services;
         }
 
-        console.log("Saving Service Names to ERP:", serviceNamesList);
-
-        // 1. String Alanına İsimleri Yaz (Kullanıcı İsteği: İsim Görünsün)
         leadPayload.custom_selected_services = serviceNamesList.join(", ");
         leadPayload.custom_selected_service_names = serviceNamesList.join(", "); 
 
-        // 2. Child Table (Teknik Eşleşme)
-        // Link alanı ID ister, İsim alanı Name ister.
         leadPayload.services = services.map((id: string, idx: number) => ({
-            service: id, // Link (ID)
-            service_name: serviceNamesList[idx], // Display Name
+            service: id,
+            service_name: serviceNamesList[idx],
             terms_accepted: 1
         }));
     }
 
-    // --- 4. Kaydetme İşlemi (Güvenli Mod) ---
     let leadResult;
     const save = async (data: any) => {
         if (existingLead?.name) return await erpPut(`/api/resource/Lead/${encodeURIComponent(existingLead.name)}`, data, token);
@@ -155,11 +136,9 @@ export async function POST(req: NextRequest) {
     };
 
     try {
-        // İlk deneme: Full paket (Child Table dahil)
         leadResult = await save(leadPayload);
     } catch (e) {
         console.warn("Full update failed, retrying without child table...", e);
-        // Hata verirse Child Table'ı silip sadece String alanları kaydet (En azından isimler gitsin)
         if (leadPayload.services) {
             delete leadPayload.services;
             leadResult = await save(leadPayload);
@@ -168,18 +147,26 @@ export async function POST(req: NextRequest) {
         }
     }
 
-    // Dosyaları yükle...
     const leadName = (leadResult?.data || leadResult).name;
+
+    // --- DOSYA YÜKLEME DÜZELTİLDİ ---
     if (uploadedFiles && Object.keys(uploadedFiles).length > 0) {
         for (const [key, files] of Object.entries(uploadedFiles)) {
             for (const f of files) {
                 try { 
-                    await erpUploadFile(f, token, "Lead", leadName); 
-                } catch {}
+                    // DÜZELTME BURADA: Parametreleri obje olarak gönderiyoruz
+                    await erpUploadFile(f, token, { 
+                        doctype: "Lead", 
+                        docname: leadName, 
+                        is_private: 1 
+                    }); 
+                } catch (e) { console.error("Upload error:", e); }
             }
         }
     }
+
     return NextResponse.json({ success: true, lead: leadResult?.data || leadResult });
+
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }

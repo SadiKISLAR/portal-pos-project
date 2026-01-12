@@ -26,7 +26,7 @@ interface Service {
   contracts: ServiceContract[];
 }
 
-const DEFAULT_TERMS_OF_USE = `By agreeing, you declare that you have read...`;
+const DEFAULT_TERMS_OF_USE = `By agreeing, you declare that you have read, fully understood, and legally accepted the Terms of Use. Furthermore, you acknowledge that the Terms may be updated periodically and that any continued use of the service constitutes acceptance of the currently valid versions. You confirm that you have familiarized yourself with all regulations and accept them as the basis for our contractual cooperation. Furthermore, you declare that all information you have provided is accurate, complete, and up-to-date. You agree to take the necessary security measures to protect your account and to refrain from any form of misuse. You also agree that personal data may be processed in accordance with applicable data protection regulations and may be disclosed to competent authorities as required by law. By giving your consent, you confirm that you have read and understood the data protection regulations and expressly agree to the described processing activities.`;
 
 export default function ServicesPage() {
   const router = useRouter();
@@ -144,19 +144,8 @@ export default function ServicesPage() {
     }
   }, [services, loadSelectedServices]);
 
-  // --- Auto Save ---
-  useEffect(() => {
-    if (isInitialLoadRef.current) return;
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-
-    saveTimeoutRef.current = setTimeout(async () => {
-      await saveSelectionToErp();
-    }, 1000);
-
-    return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
-  }, [selectedServices]);
-
-  const saveSelectionToErp = async () => {
+  // DÜZELTME: saveSelectionToErp fonksiyonu useCallback ile tanımlandı
+  const saveSelectionToErp = useCallback(async () => {
     let userEmail = sessionStorage.getItem("userEmail");
     if (!userEmail) {
         const initialData = localStorage.getItem("initialRegistrationData");
@@ -175,7 +164,19 @@ export default function ServicesPage() {
         }),
       });
     } catch (error) { console.error("Auto-save failed", error); }
-  };
+  }, [selectedServices]);
+
+  // DÜZELTME: useEffect dependency uyarısı giderildi, saveSelectionToErp eklendi
+  useEffect(() => {
+    if (isInitialLoadRef.current) return;
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+
+    saveTimeoutRef.current = setTimeout(async () => {
+      await saveSelectionToErp();
+    }, 1000);
+
+    return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
+  }, [selectedServices, saveSelectionToErp]);
 
   const handleServiceToggle = (serviceId: string) => {
     setSelectedServices((prev) => {
@@ -237,6 +238,8 @@ export default function ServicesPage() {
                         <div className="w-full md:w-1/3 flex-shrink-0">
                            <div className="aspect-video relative rounded-lg overflow-hidden bg-gray-100 border border-gray-200">
                              {service.image ? (
+                               // DÜZELTME: Image uyarısı için eslint disable eklendi
+                               /* eslint-disable-next-line @next/next/no-img-element */
                                <img src={service.image} alt={service.name} className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
                              ) : (
                                <div className="w-full h-full flex items-center justify-center text-gray-400 text-sm">No Image</div>
