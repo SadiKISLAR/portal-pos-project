@@ -189,7 +189,7 @@ export default function DeliveryMethodPage() {
     setBusinessRegions(regions);
   }, [fetchPostcodes]);
 
-  const loadBusinessesFromLead = useCallback(async () => {
+  const loadBusinessesFromLead = useCallback(async (selectionsCount: number) => {
     setLoadingBusinesses(true);
     try {
       let userEmail = "";
@@ -231,7 +231,7 @@ export default function DeliveryMethodPage() {
         if (data.lead.businesses && Array.isArray(data.lead.businesses) && data.lead.businesses.length > 0) {
           leadBusinesses = data.lead.businesses;
         } else {
-          const brandCount = selections.length || 3;
+          const brandCount = selectionsCount || 3;
           leadBusinesses = Array.from({ length: brandCount }, (_, i) => ({
             businessName: `Business ${i + 1}`,
             street: "",
@@ -257,19 +257,19 @@ export default function DeliveryMethodPage() {
     } finally {
       setLoadingBusinesses(false);
     }
-  }, [selections, initializeBusinessRegions]);
+  }, [initializeBusinessRegions]);
 
   useEffect(() => {
     const savedSelections = localStorage.getItem("brandSelections");
     if (savedSelections) {
-      setSelections(JSON.parse(savedSelections));
+      const parsed = JSON.parse(savedSelections);
+      setSelections(parsed);
+      loadBusinessesFromLead(parsed.length);
     } else {
       router.push("/brand-register/brand-selection");
-      return;
     }
-
-    loadBusinessesFromLead();
-  }, [router, loadBusinessesFromLead]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router]);
 
   const updateBusinessRegion = (index: number, field: string, value: any) => {
     setBusinessRegions((prev) => ({
