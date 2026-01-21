@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -117,6 +117,9 @@ export default function DeliveryMethodPage() {
   });
   const [editingExceptionId, setEditingExceptionId] = useState<string | null>(null);
 
+  // Timeout refs for debouncing
+  const postcodeTimeoutRefs = useRef<{ [key: number]: NodeJS.Timeout }>({});
+
   // Postcodes'ları getir
   const fetchPostcodes = useCallback(async (index: number, postcode: string, radius: number) => {
     if (!postcode || postcode.length < 4) return;
@@ -179,14 +182,17 @@ export default function DeliveryMethodPage() {
         postCodes: [],
         loading: false,
       };
+    });
+    setBusinessRegions(regions);
 
+    // Fetch postcodes after state is set
+    businessList.forEach((business, index) => {
       if (business.postalCode) {
         setTimeout(() => {
           fetchPostcodes(index, business.postalCode, 5);
         }, index * 500);
       }
     });
-    setBusinessRegions(regions);
   }, [fetchPostcodes]);
 
   const loadBusinessesFromLead = useCallback(async (selectionsCount: number) => {
@@ -271,27 +277,52 @@ export default function DeliveryMethodPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
+  // Cleanup timeouts on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(postcodeTimeoutRefs.current).forEach((timeout) => {
+        if (timeout) clearTimeout(timeout);
+      });
+    };
+  }, []);
+
   const updateBusinessRegion = (index: number, field: string, value: any) => {
-    setBusinessRegions((prev) => ({
-      ...prev,
-      [index]: {
-        ...prev[index],
-        [field]: value,
-      },
-    }));
+    setBusinessRegions((prev) => {
+      const currentRegion = prev[index] || {
+        region: "",
+        radius: 5,
+        postCodes: [],
+        loading: false,
+      };
 
-    if (field === "region" || field === "radius") {
-      const region = field === "region" ? value : businessRegions[index]?.region;
-      const radius = field === "radius" ? value : businessRegions[index]?.radius;
+      const updated = {
+        ...prev,
+        [index]: {
+          ...currentRegion,
+          [field]: value,
+        },
+      };
 
-      const timeoutId = setTimeout(() => {
-        if (region && region.length >= 4) {
-          fetchPostcodes(index, region, radius);
+      // Debounce postcode fetching for region/radius changes
+      if (field === "region" || field === "radius") {
+        // Clear existing timeout
+        if (postcodeTimeoutRefs.current[index]) {
+          clearTimeout(postcodeTimeoutRefs.current[index]);
         }
-      }, 500);
 
-      return () => clearTimeout(timeoutId);
-    }
+        const region = field === "region" ? value : updated[index].region;
+        const radius = field === "radius" ? value : updated[index].radius;
+
+        // Set new timeout
+        postcodeTimeoutRefs.current[index] = setTimeout(() => {
+          if (region && typeof region === "string" && region.length >= 4) {
+            fetchPostcodes(index, region, radius);
+          }
+        }, 500);
+      }
+
+      return updated;
+    });
   };
 
   // Schedule functions
@@ -528,7 +559,7 @@ export default function DeliveryMethodPage() {
                               <p className="text-xs text-gray-400">Loading postcodes...</p>
                             ) : businessRegions[index]?.postCodes?.length > 0 ? (
                               <p className="text-xs text-gray-600">
-                                {businessRegions[index].postCodes.join(", ")}
+                                {businessRegions[index]?.postCodes?.join(", ") || ""}
                               </p>
                             ) : (
                               <p className="text-xs text-gray-400">
