@@ -628,7 +628,7 @@ export default function AgreementsPage() {
                         ✅ Signed PDFs are ready!
                       </p>
                       <p className="text-xs text-green-700 mt-1">
-                        You can download each PDF individually using the "Download" button next to each PDF, or download all at once using the button above.
+                        You can download each PDF individually using the &quot;Download&quot; button next to each PDF, or download all at once using the button above.
                       </p>
                     </div>
                   </div>
@@ -805,7 +805,7 @@ export default function AgreementsPage() {
                   />
                 </div>
                 <p className="text-xs text-gray-500 mt-2 text-center">
-                  Draw your signature above. It will be added to all PDFs when you click "Next".
+                  Draw your signature above. It will be added to all PDFs when you click &quot;Next&quot;.
                 </p>
               </div>
 
