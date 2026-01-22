@@ -12,7 +12,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Check if user is logged in
+    // Check if user is logged in  
     if (typeof window !== "undefined") {
       const storedUser = sessionStorage.getItem("user");
       const storedEmail = sessionStorage.getItem("userEmail");
