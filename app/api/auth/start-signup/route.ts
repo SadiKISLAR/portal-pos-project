@@ -15,11 +15,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Sunucu ayarları eksik (.env kontrol edin)." }, { status: 500 });
     }
 
+    // Frontend URL'ini environment variable'dan al, yoksa varsayılan olarak Vercel URL'ini kullan
+    const frontendUrl = process.env.NEXT_PUBLIC_FRONTEND_URL || "https://portal-pos-projectv2.vercel.app";
+
     // İŞLEMİ ERP'YE DEVRET
     // Bu Python fonksiyonu ERP'de yüklü olmalı: portal_onboarding.api.signup.start_signup
     const data = await erpPost(
       "/api/method/portal_onboarding.api.signup.start_signup",
-      { full_name, email },
+      { full_name, email, frontend_url: frontendUrl },
       token
     );
 

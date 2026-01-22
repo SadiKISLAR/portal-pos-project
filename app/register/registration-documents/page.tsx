@@ -49,6 +49,8 @@ export default function RegistrationDocumentsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [parsingPdf, setParsingPdf] = useState(false);
+  const [validatingDocuments, setValidatingDocuments] = useState<Record<string, boolean>>({});
+  const [documentValidationErrors, setDocumentValidationErrors] = useState<Record<string, string>>({});
   const errorText =
     typeof error === "string" ? error : (error as any)?.message || JSON.stringify(error);
 
@@ -205,7 +207,7 @@ export default function RegistrationDocumentsPage() {
     loadDocumentsInfo();
   }, [formData.currentStep, goToStep, fetchCompanyTypes, loadDocumentsInfo]);
 
-  const handleFileSelect = (
+  const handleFileSelect = async (
     files: FileList | null,
     documentId: string,
     maxFiles: number = 5
@@ -219,6 +221,7 @@ export default function RegistrationDocumentsPage() {
       return isValidSize && isValidFormat;
     });
 
+    // Önce dosyaları ekle
     setDocumentData((prev) => {
       const currentFiles = prev[documentId]?.files || [];
       const combined = [...currentFiles, ...validFiles];
@@ -230,6 +233,71 @@ export default function RegistrationDocumentsPage() {
         },
       };
     });
+
+    // Belge adını bul
+    const document = requiredDocuments.find((doc) => doc.id === documentId);
+    if (!document) return;
+
+    // Yeni yüklenen her dosya için doğrulama yap
+    for (const file of validFiles) {
+      setValidatingDocuments((prev) => ({
+        ...prev,
+        [`${documentId}_${file.name}`]: true,
+      }));
+
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("documentName", document.documentName);
+
+        const res = await fetch("/api/documents/validate-content", {
+          method: "POST",
+          body: formData,
+        });
+
+        const data = await res.json();
+
+        if (!data.isValid) {
+          // Belge doğru değilse uyarı göster
+          let errorMessage = data.message || "This document is not the expected document type.";
+          
+          // Farkları ekle
+          if (data.differences && Array.isArray(data.differences) && data.differences.length > 0) {
+            errorMessage += "\n\nDetected differences:\n" + data.differences.map((diff: string, idx: number) => `${idx + 1}. ${diff}`).join("\n");
+          } else if (data.reason) {
+            errorMessage += `\n\nDetails: ${data.reason}`;
+          }
+          
+          if (data.hasReference) {
+            errorMessage += "\n\n(Compared with reference document)";
+          }
+          
+          setDocumentValidationErrors((prev) => ({
+            ...prev,
+            [`${documentId}_${file.name}`]: errorMessage,
+          }));
+
+          // Kullanıcıya uyarı göster
+          alert(`⚠️ WARNING: ${file.name}\n\n${errorMessage}\n\nPlease upload the correct document.`);
+        } else {
+          // Doğru belgeyse hata mesajını temizle
+          setDocumentValidationErrors((prev) => {
+            const newErrors = { ...prev };
+            delete newErrors[`${documentId}_${file.name}`];
+            return newErrors;
+          });
+        }
+      } catch (error: any) {
+        console.error("Belge doğrulama hatası:", error);
+        // Hata olsa bile devam et, sadece logla
+      } finally {
+        setValidatingDocuments((prev) => {
+          const newValidating = { ...prev };
+          delete newValidating[`${documentId}_${file.name}`];
+          return newValidating;
+        });
+      }
+    }
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -237,14 +305,14 @@ export default function RegistrationDocumentsPage() {
     e.stopPropagation();
   };
 
-  const handleDrop = (
+  const handleDrop = async (
     e: React.DragEvent,
     documentId: string,
     maxFiles: number = 5
   ) => {
     e.preventDefault();
     e.stopPropagation();
-    handleFileSelect(e.dataTransfer.files, documentId, maxFiles);
+    await handleFileSelect(e.dataTransfer.files, documentId, maxFiles);
   };
 
   const handleFileInputClick = (documentId: string) => {
@@ -728,21 +796,57 @@ export default function RegistrationDocumentsPage() {
 
                             {documentData[doc.id]?.files && documentData[doc.id].files!.length > 0 && (
                               <div className="space-y-2">
-                                {documentData[doc.id].files!.map((file, index) => (
-                                  <div
-                                    key={index}
-                                    className="flex items-center justify-between p-2 bg-gray-50 rounded border"
-                                  >
-                                    <span className="text-sm text-gray-700 truncate flex-1">{file.name}</span>
-                                    <button
-                                      type="button"
-                                      onClick={() => removeFile(doc.id, index)}
-                                      className="text-red-500 hover:text-red-700 text-sm ml-2"
-                                    >
-                                      Remove
-                                    </button>
-                                  </div>
-                                ))}
+                                {documentData[doc.id].files!.map((file, index) => {
+                                  const validationKey = `${doc.id}_${file.name}`;
+                                  const isValidating = validatingDocuments[validationKey];
+                                  const validationError = documentValidationErrors[validationKey];
+                                  
+                                  return (
+                                    <div key={index} className="space-y-1">
+                                      <div
+                                        className={`flex items-center justify-between p-2 rounded border ${
+                                          validationError 
+                                            ? "bg-red-50 border-red-300" 
+                                            : "bg-gray-50 border-gray-200"
+                                        }`}
+                                      >
+                                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                                          {isValidating && (
+                                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 flex-shrink-0"></div>
+                                          )}
+                                          {!isValidating && validationError && (
+                                            <span className="text-red-500 text-lg flex-shrink-0">⚠️</span>
+                                          )}
+                                          {!isValidating && !validationError && (
+                                            <span className="text-green-500 text-lg flex-shrink-0">✓</span>
+                                          )}
+                                          <span className="text-sm text-gray-700 truncate flex-1">{file.name}</span>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            removeFile(doc.id, index);
+                                            // Hata mesajını da temizle
+                                            setDocumentValidationErrors((prev) => {
+                                              const newErrors = { ...prev };
+                                              delete newErrors[validationKey];
+                                              return newErrors;
+                                            });
+                                          }}
+                                          className="text-red-500 hover:text-red-700 text-sm ml-2 flex-shrink-0"
+                                        >
+                                          Remove
+                                        </button>
+                                      </div>
+                                      {validationError && (
+                                        <div className="p-3 bg-red-50 border border-red-300 rounded text-red-800 text-xs">
+                                          <div className="font-semibold mb-1">⚠️ This document is not in the correct format:</div>
+                                          <div className="whitespace-pre-line">{validationError}</div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
                               </div>
                             )}
                           </>
