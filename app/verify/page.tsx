@@ -79,8 +79,8 @@ function VerifyContent() {
         }
 
         setTimeout(() => {
-          // Redirect to registration wizard (first step)
-          router.push("/register");
+          // Redirect to registration wizard (services step)
+          router.push("/register/services");
         }, 2000);
 
       } catch (error) {
@@ -112,7 +112,7 @@ function VerifyContent() {
               <CheckCircle className="h-12 w-12 text-green-500 mb-4" />
               <h2 className="text-xl font-semibold text-green-700 mb-2">Success!</h2>
               <p className="text-gray-600 mb-6">{message}</p>
-              <Button onClick={() => router.push("/register")}>
+              <Button onClick={() => router.push("/register/services")}>
                 Continue Now
               </Button>
             </>
