@@ -196,8 +196,8 @@ export default function RegistrationDocumentsPage() {
   }, []);
 
   useEffect(() => {
-    if (formData.currentStep !== 4) {
-      goToStep(4);
+    if (formData.currentStep !== 2) {
+      goToStep(2);
     }
 
     // Company type'ları yükle
@@ -535,16 +535,30 @@ export default function RegistrationDocumentsPage() {
           });
 
           const parseData = await parseRes.json();
+          
+          console.log("📄 PDF Parse Response:", parseData);
 
           if (parseData.success && parseData.companyInfo) {
             // Okunan bilgileri localStorage'a kaydet
             if (typeof window !== "undefined") {
               localStorage.setItem("parsedCompanyInfo", JSON.stringify(parseData.companyInfo));
+              console.log("✅ Parsed company info saved to localStorage:", parseData.companyInfo);
+              
+              // Kullanıcıya bilgi ver
+              const extractedFields = [];
+              if (parseData.companyInfo.companyName) extractedFields.push("Company Name");
+              if (parseData.companyInfo.vatIdentificationNumber) extractedFields.push("VAT Number");
+              if (parseData.companyInfo.taxIdNumber) extractedFields.push("Tax ID");
+              if (parseData.companyInfo.street || parseData.companyInfo.city) extractedFields.push("Address");
+              
+              if (extractedFields.length > 0) {
+                alert(`✅ PDF başarıyla okundu!\n\nAşağıdaki bilgiler Company Information sayfasına otomatik olarak yüklenecek:\n${extractedFields.join(", ")}`);
+              }
             }
             
             // PDF'den okunan bilgileri direkt Lead'e de kaydet
             try {
-              await fetch("/api/erp/update-lead", {
+              const updateRes = await fetch("/api/erp/update-lead", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -552,11 +566,40 @@ export default function RegistrationDocumentsPage() {
                   companyInfo: parseData.companyInfo
                 }),
               });
+              
+              const updateData = await updateRes.json();
+              if (updateRes.ok && updateData.success) {
+                console.log("✅ Company info saved to Lead:", updateData);
+              } else {
+                console.warn("⚠️ Failed to save company info to Lead:", updateData);
+              }
             } catch (updateError) {
+              console.error("❌ Error saving company info to Lead:", updateError);
               // Devam et, localStorage'da zaten var
+            }
+          } else {
+            console.error("❌ PDF parse failed or no company info:", parseData);
+            if (parseData.error) {
+              console.error("Parse error details:", parseData.error);
+              
+              // Kullanıcı dostu hata mesajı
+              let errorMessage = "⚠️ PDF'den bilgiler otomatik olarak okunamadı.\n\n";
+              
+              if (parseData.suggestion) {
+                errorMessage += parseData.suggestion + "\n\n";
+              } else {
+                errorMessage += "Bu PDF görsel tabanlı (image-based) olabilir veya metin içermiyor olabilir.\n\n";
+              }
+              
+              errorMessage += "Endişelenmeyin! Bilgileri Company Information sayfasında manuel olarak girebilirsiniz.";
+              
+              alert(errorMessage);
+            } else {
+              alert("⚠️ PDF'den bilgi çıkarılamadı.\n\nBilgileri Company Information sayfasında manuel olarak girebilirsiniz.");
             }
           }
         } catch (parseError) {
+          console.error("❌ PDF parse error:", parseError);
           // Hata olsa bile devam et, kullanıcı manuel doldurabilir
         } finally {
           setParsingPdf(false);

@@ -24,6 +24,14 @@ const nextConfig = {
       config.externals.push({
         'canvas': 'commonjs canvas',
       });
+      
+      // pdfjs-dist için resolve fallback
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        fs: false,
+        path: false,
+        crypto: false,
+      };
     }
     return config;
   },

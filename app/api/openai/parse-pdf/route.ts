@@ -6,6 +6,129 @@ import path from "path";
 // Node.js runtime kullan
 export const runtime = "nodejs";
 
+// PDF'i görsele çevir (PNG formatına)
+async function convertPdfToImage(pdfBuffer: Buffer): Promise<Buffer> {
+  try {
+    // pdfjs-dist'i dynamic import ile yükle
+    const pdfjsLib = await import("pdfjs-dist");
+    
+    // Worker'ı devre dışı bırak (Node.js'de gerekli değil)
+    if (pdfjsLib.GlobalWorkerOptions) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = "";
+    }
+    
+    // PDF'i yükle
+    const loadingTask = pdfjsLib.getDocument({ 
+      data: new Uint8Array(pdfBuffer),
+      useSystemFonts: true,
+      verbosity: 0, // Hata mesajlarını azalt
+    });
+    
+    const pdf = await loadingTask.promise;
+    
+    // İlk sayfayı al
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewport({ scale: 2.0 });
+    
+    // Canvas oluştur
+    const { createCanvas } = await import("canvas");
+    const canvas = createCanvas(Math.floor(viewport.width), Math.floor(viewport.height));
+    const context = canvas.getContext("2d");
+    
+    // PDF sayfasını canvas'a render et
+    const renderContext = {
+      canvasContext: context as any,
+      viewport: viewport,
+    };
+    
+    await page.render(renderContext).promise;
+    
+    // Canvas'ı PNG buffer'a çevir
+    const imageBuffer = canvas.toBuffer("image/png");
+    
+    return imageBuffer;
+  } catch (error) {
+    console.error("PDF to image conversion error:", error);
+    throw new Error("Failed to convert PDF to image: " + (error as Error).message);
+  }
+}
+
+// Görsel dosyalardan ve image-based PDF'lerden metin çıkarmak için OCR (OpenAI Vision API)
+async function extractTextWithOCR(buffer: Buffer, mimeType: string): Promise<string> {
+  const openaiApiKey = process.env.OPENAI_API_KEY;
+  if (!openaiApiKey) {
+    throw new Error("OpenAI API key is not configured");
+  }
+
+  let imageBuffer = buffer;
+  let finalMimeType = mimeType;
+  
+  // Eğer PDF ise, önce görsele çevir
+  if (mimeType === "application/pdf") {
+    try {
+      console.log("📄 Converting PDF to image for OCR...");
+      imageBuffer = await convertPdfToImage(buffer);
+      finalMimeType = "image/png";
+      console.log("✅ PDF converted to image for OCR");
+    } catch (conversionError) {
+      console.error("❌ PDF to image conversion failed:", conversionError);
+      throw new Error("Failed to convert PDF to image: " + (conversionError as Error).message);
+    }
+  }
+
+  // Base64'e çevir
+  const base64Image = imageBuffer.toString("base64");
+  const dataUrl = `data:${finalMimeType};base64,${base64Image}`;
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${openaiApiKey}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o",
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: "Extract all text from this document. Return only the extracted text, nothing else. If there is no text, return 'NO_TEXT_FOUND'.",
+              },
+              {
+                type: "image_url",
+                image_url: {
+                  url: dataUrl,
+                },
+              },
+            ],
+          },
+        ],
+        max_tokens: 4000,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(`OpenAI Vision API error: ${JSON.stringify(errorData)}`);
+    }
+
+    const data = await response.json();
+    const extractedText = data.choices[0]?.message?.content || "";
+
+    if (extractedText.trim() === "NO_TEXT_FOUND" || extractedText.trim().length === 0) {
+      return "";
+    }
+
+    return extractedText.trim();
+  } catch (error: any) {
+    console.error("OCR extraction error:", error);
+    throw error;
+  }
+}
+
 // PDF'den metin çıkarmak için pdf2json kullan
 async function extractTextFromPdf(buffer: Buffer): Promise<string> {
   // Geçici dosya oluştur
@@ -98,25 +221,66 @@ export async function POST(req: NextRequest) {
     const pdfBuffer = Buffer.from(arrayBuffer);
 
     // PDF'den metin çıkar
-    let pdfText: string;
+    let pdfText: string = "";
     try {
+      // Önce normal PDF metin çıkarma dene
       pdfText = await extractTextFromPdf(pdfBuffer);
       
+      // Eğer metin çıkarılamazsa OCR kullan (image-based PDF)
       if (!pdfText || pdfText.trim().length === 0) {
-        return NextResponse.json(
-          { error: "No text could be extracted from PDF. The PDF might be image-based or corrupted." },
-          { status: 400 }
-        );
+        console.log("PDF'den metin çıkarılamadı, OCR (görsel okuma) deneniyor...");
+        try {
+          pdfText = await extractTextWithOCR(pdfBuffer, "application/pdf");
+          if (!pdfText || pdfText.trim().length === 0) {
+            return NextResponse.json(
+              { 
+                error: "PDF'den metin çıkarılamadı. Bu PDF görsel tabanlı (image-based) olabilir. Lütfen bilgileri manuel olarak girin.",
+                suggestion: "PDF içeriği görsel formatında olduğu için otomatik okuma yapılamıyor. Bilgileri Company Information sayfasında manuel olarak girebilirsiniz."
+              },
+              { status: 400 }
+            );
+          }
+          console.log("✅ OCR ile metin başarıyla çıkarıldı");
+        } catch (ocrError: any) {
+          console.error("OCR extraction error:", ocrError);
+          return NextResponse.json(
+            { 
+              error: "PDF'den metin çıkarılamadı. Bu PDF görsel tabanlı (image-based) olabilir.",
+              suggestion: "Bilgileri Company Information sayfasında manuel olarak girebilirsiniz.",
+              details: ocrError.message || String(ocrError)
+            },
+            { status: 400 }
+          );
+        }
       }
     } catch (pdfError: any) {
       console.error("PDF text extraction error:", pdfError);
-      return NextResponse.json(
-        { 
-          error: "Failed to extract text from PDF", 
-          details: pdfError.message || String(pdfError)
-        },
-        { status: 500 }
-      );
+      // PDF parsing hatası olsa bile OCR dene
+      try {
+        console.log("PDF parsing hatası, OCR (görsel okuma) deneniyor...");
+        pdfText = await extractTextWithOCR(pdfBuffer, "application/pdf");
+        if (!pdfText || pdfText.trim().length === 0) {
+          return NextResponse.json(
+            { 
+              error: "PDF okunamadı. PDF dosyası bozuk olabilir veya görsel tabanlı olabilir.",
+              suggestion: "Lütfen bilgileri Company Information sayfasında manuel olarak girin.",
+              details: "Both PDF parsing and OCR failed"
+            },
+            { status: 400 }
+          );
+        }
+        console.log("✅ OCR ile metin başarıyla çıkarıldı");
+      } catch (ocrError: any) {
+        console.error("OCR extraction error:", ocrError);
+        return NextResponse.json(
+          { 
+            error: "PDF okunamadı. PDF dosyası bozuk olabilir veya görsel tabanlı olabilir.",
+            suggestion: "Lütfen bilgileri Company Information sayfasında manuel olarak girin.",
+            details: pdfError.message || String(pdfError)
+          },
+          { status: 400 }
+        );
+      }
     }
     
     // İlk 8000 karakteri al
@@ -186,25 +350,55 @@ Please extract all relevant company information from the text above.`,
       }
 
       const data = await response.json();
-      const parsedInfo = JSON.parse(data.choices[0].message.content);
+      
+      if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+        console.error("Unexpected OpenAI response format:", data);
+        return NextResponse.json(
+          { 
+            success: false,
+            error: "Unexpected response format from OpenAI API" 
+          },
+          { status: 500 }
+        );
+      }
+
+      let parsedInfo;
+      try {
+        const content = data.choices[0].message.content;
+        parsedInfo = typeof content === 'string' ? JSON.parse(content) : content;
+        console.log("✅ Parsed company info from OpenAI:", parsedInfo);
+      } catch (parseError) {
+        console.error("JSON parse error:", parseError, "Content:", data.choices[0].message.content);
+        return NextResponse.json(
+          { 
+            success: false,
+            error: "Failed to parse OpenAI response" 
+          },
+          { status: 500 }
+        );
+      }
+
+      const companyInfo = {
+        companyName: parsedInfo.companyName || "",
+        vatIdentificationNumber: parsedInfo.vatIdentificationNumber || "",
+        taxIdNumber: parsedInfo.taxIdNumber || "",
+        restaurantCount: parsedInfo.restaurantCount || "",
+        street: parsedInfo.street || "",
+        city: parsedInfo.city || "",
+        zipCode: parsedInfo.postalCode || "",
+        country: parsedInfo.country || "",
+        federalState: parsedInfo.federalState || "",
+        businessName: parsedInfo.businessName || "",
+        ownerDirector: parsedInfo.ownerDirector || "",
+        ownerEmail: parsedInfo.ownerEmail || "",
+        ownerTelephone: parsedInfo.ownerTelephone || "",
+      };
+
+      console.log("✅ Returning company info:", companyInfo);
 
       return NextResponse.json({
         success: true,
-        companyInfo: {
-          companyName: parsedInfo.companyName || "",
-          vatIdentificationNumber: parsedInfo.vatIdentificationNumber || "",
-          taxIdNumber: parsedInfo.taxIdNumber || "",
-          restaurantCount: parsedInfo.restaurantCount || "",
-          street: parsedInfo.street || "",
-          city: parsedInfo.city || "",
-          zipCode: parsedInfo.postalCode || "",
-          country: parsedInfo.country || "",
-          federalState: parsedInfo.federalState || "",
-          businessName: parsedInfo.businessName || "",
-          ownerDirector: parsedInfo.ownerDirector || "",
-          ownerEmail: parsedInfo.ownerEmail || "",
-          ownerTelephone: parsedInfo.ownerTelephone || "",
-        },
+        companyInfo: companyInfo,
       });
     } catch (apiError: any) {
       console.error("OpenAI API error:", apiError);
