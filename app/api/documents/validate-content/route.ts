@@ -201,7 +201,8 @@ async function convertPdfToImage(pdfBuffer: Buffer): Promise<Buffer> {
     // Canvas'ı PNG buffer'a çevir
     const imageBuffer = canvas.toBuffer("image/png");
     
-    return imageBuffer;
+    // Buffer tip uyumluluğu için Buffer.from kullan
+    return Buffer.from(imageBuffer);
   } catch (error) {
     console.error("PDF to image conversion error:", error);
     throw new Error("Failed to convert PDF to image: " + (error as Error).message);
@@ -602,7 +603,7 @@ IMPORTANT:
       if (false && useVision) {
         // Vision API kullan - görseli direkt gönder
         // Eğer PDF ise, önce görsele çevir
-        let imageBuffer = fileBuffer;
+        let imageBuffer: Buffer = fileBuffer;
         let finalMimeType = file.type || "application/pdf";
         
         if (finalMimeType === "application/pdf") {
