@@ -114,8 +114,8 @@ export default function CompanyInformationPage() {
 
   // DÜZELTME: useEffect dependency uyarısı için disable eklendi
   useEffect(() => {
-    if (formData.currentStep !== 1) {
-      goToStep(1);
+    if (formData.currentStep !== 4) {
+      goToStep(4);
     }
     const count = parseInt(restaurantCount) || 1;
     if (formData.restaurants.length !== count) {
@@ -234,16 +234,45 @@ export default function CompanyInformationPage() {
             // Önce parsed bilgileri yükle (PDF'den okunan bilgiler öncelikli)
             if (parsedCompanyInfo) {
               console.log("📄 Loading parsed company info from PDF (PRIORITY)");
+              console.log("📄 Full parsedCompanyInfo object:", parsedCompanyInfo);
+              
               // Parsed bilgiler öncelikli - tüm alanları yükle
-              if (parsedCompanyInfo.companyName) companyInfo.companyName = parsedCompanyInfo.companyName;
-              if (parsedCompanyInfo.vatIdentificationNumber) companyInfo.vatIdentificationNumber = parsedCompanyInfo.vatIdentificationNumber;
-              if (parsedCompanyInfo.taxIdNumber) companyInfo.taxIdNumber = parsedCompanyInfo.taxIdNumber;
-              if (parsedCompanyInfo.restaurantCount) companyInfo.restaurantCount = parsedCompanyInfo.restaurantCount;
-              if (parsedCompanyInfo.street) companyInfo.street = parsedCompanyInfo.street;
-              if (parsedCompanyInfo.city) companyInfo.city = parsedCompanyInfo.city;
-              if (parsedCompanyInfo.zipCode) companyInfo.zipCode = parsedCompanyInfo.zipCode;
-              if (parsedCompanyInfo.country) companyInfo.country = parsedCompanyInfo.country;
-              if (parsedCompanyInfo.federalState) companyInfo.federalState = parsedCompanyInfo.federalState;
+              if (parsedCompanyInfo.companyName) {
+                companyInfo.companyName = parsedCompanyInfo.companyName;
+                console.log("✅ Set companyName:", parsedCompanyInfo.companyName);
+              }
+              if (parsedCompanyInfo.vatIdentificationNumber) {
+                companyInfo.vatIdentificationNumber = parsedCompanyInfo.vatIdentificationNumber;
+                console.log("✅ Set vatIdentificationNumber:", parsedCompanyInfo.vatIdentificationNumber);
+              }
+              if (parsedCompanyInfo.taxIdNumber) {
+                companyInfo.taxIdNumber = parsedCompanyInfo.taxIdNumber;
+                console.log("✅ Set taxIdNumber:", parsedCompanyInfo.taxIdNumber);
+              }
+              if (parsedCompanyInfo.restaurantCount) {
+                companyInfo.restaurantCount = parsedCompanyInfo.restaurantCount;
+                console.log("✅ Set restaurantCount:", parsedCompanyInfo.restaurantCount);
+              }
+              if (parsedCompanyInfo.street) {
+                companyInfo.street = parsedCompanyInfo.street;
+                console.log("✅ Set street:", parsedCompanyInfo.street);
+              }
+              if (parsedCompanyInfo.city) {
+                companyInfo.city = parsedCompanyInfo.city;
+                console.log("✅ Set city:", parsedCompanyInfo.city);
+              }
+              if (parsedCompanyInfo.zipCode) {
+                companyInfo.zipCode = parsedCompanyInfo.zipCode;
+                console.log("✅ Set zipCode:", parsedCompanyInfo.zipCode);
+              }
+              if (parsedCompanyInfo.country) {
+                companyInfo.country = parsedCompanyInfo.country;
+                console.log("✅ Set country:", parsedCompanyInfo.country);
+              }
+              if (parsedCompanyInfo.federalState) {
+                companyInfo.federalState = parsedCompanyInfo.federalState;
+                console.log("✅ Set federalState:", parsedCompanyInfo.federalState);
+              }
               
               console.log("✅ Parsed company info loaded:", companyInfo);
               console.log("📋 Business info from PDF:", {
@@ -252,6 +281,8 @@ export default function CompanyInformationPage() {
                 ownerEmail: parsedCompanyInfo.ownerEmail,
                 ownerTelephone: parsedCompanyInfo.ownerTelephone
               });
+            } else {
+              console.warn("⚠️ No parsedCompanyInfo found in localStorage");
             }
             
             // Lead'den gelen bilgileri sadece parsed bilgiler yoksa veya eksikse ekle
@@ -303,7 +334,9 @@ export default function CompanyInformationPage() {
               }
             }
 
+            console.log("🔄 Updating formData with companyInfo:", companyInfo);
             updateFormData({ companyInfo: companyInfo });
+            console.log("✅ FormData updated. New formData.companyInfo:", formData.companyInfo);
           }
 
           // Lead'den businesses yükle, ama PDF'den okunan bilgiler öncelikli

@@ -189,7 +189,7 @@ export default function ServicesPage() {
 
   // --- Initial Load ---
   useEffect(() => {
-    if (formData.currentStep !== 2) goToStep(2);
+    if (formData.currentStep !== 1) goToStep(1);
     fetchServices();
   }, [formData.currentStep, goToStep, fetchServices]);
 
