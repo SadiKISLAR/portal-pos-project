@@ -8,17 +8,44 @@ const normalizeCountry = (country: string | undefined | null): string | undefine
     if (!country) return country ?? undefined;
 
     const map: Record<string, string> = {
+        // Türkçe
         "Türkiye": "Turkey",
         "Turkiye": "Turkey",
         "Republic of Turkey": "Turkey",
+        "Almanya": "Germany",  // ÖNEMLİ: Türkçe "Almanya" -> İngilizce "Germany"
+        // Almanca
         "Deutschland": "Germany",
         "Federal Republic of Germany": "Germany",
+        "Bundesrepublik Deutschland": "Germany",
+        // İngilizce (zaten doğru)
+        "Germany": "Germany",
+        // ABD
         "United States of America": "United States",
+        "USA": "United States",
+        "ABD": "United States",
+        "Amerika": "United States",
+        // İspanya
         "İspanya": "Spain",
         "Ispanya": "Spain",
-        "Spain": "Spain", // Zaten İngilizce ise olduğu gibi
+        "Spain": "Spain",
         "España": "Spain",
         "Espana": "Spain",
+        // Diğer yaygın ülkeler
+        "Fransa": "France",
+        "France": "France",
+        "İtalya": "Italy",
+        "Italya": "Italy",
+        "Italy": "Italy",
+        "Hollanda": "Netherlands",
+        "Netherlands": "Netherlands",
+        "Avusturya": "Austria",
+        "Austria": "Austria",
+        "İsviçre": "Switzerland",
+        "Isvicre": "Switzerland",
+        "Switzerland": "Switzerland",
+        "Belçika": "Belgium",
+        "Belcika": "Belgium",
+        "Belgium": "Belgium",
     };
 
     return map[country] || country;
@@ -321,12 +348,18 @@ export async function POST(req: NextRequest) {
             leadPayload.custom_document_data = documentDataJson;
         }
         
+        // ÖNEMLI: isCompleted === true ise MUTLAKA "Completed" olarak set et
         if (documents.isCompleted === true) {
             leadPayload.custom_registration_status = "Completed";
+            console.log("✅ Registration Status set to: Completed");
         } else if (documents.typeOfCompany || documents.documentData) {
             leadPayload.custom_registration_status = "In Progress";
         }
     }
+    
+    // companyInfo ve businesses debug logları
+    console.log("📋 Received companyInfo:", companyInfo ? JSON.stringify(companyInfo, null, 2) : "NULL");
+    console.log("📋 Received businesses:", businesses ? `${businesses.length} items` : "NULL");
 
     // KAYDETME İŞLEMİ
     let leadResult;

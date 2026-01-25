@@ -327,15 +327,15 @@ export async function POST(req: NextRequest) {
         
         // Eğer metin çıkarılamazsa OCR kullan (image-based PDF)
         if (!documentText || documentText.trim().length === 0) {
-          console.log("PDF'den metin çıkarılamadı, OCR (görsel okuma) deneniyor...");
+          console.log("Could not extract text from PDF, trying OCR (image reading)...");
           try {
             documentText = await extractTextWithOCR(fileBuffer, "application/pdf");
             if (!documentText || documentText.trim().length === 0) {
-              console.warn("OCR ile de metin çıkarılamadı - görsel tabanlı PDF, belge kabul edilecek");
+              console.warn("Could not extract text with OCR either - image-based PDF, document will be accepted");
               // Boş metinle devam et, belge yine de kabul edilecek
               documentText = "";
             } else {
-              console.log("✅ OCR ile metin başarıyla çıkarıldı");
+              console.log("✅ Text extracted successfully with OCR");
             }
           } catch (ocrError: any) {
             console.error("OCR extraction error:", ocrError);
@@ -347,7 +347,7 @@ export async function POST(req: NextRequest) {
         console.error("PDF text extraction error:", pdfError);
         // PDF parsing hatası olsa bile OCR dene
         try {
-          console.log("PDF parsing hatası, OCR (görsel okuma) deneniyor...");
+          console.log("PDF parsing error, trying OCR (image reading)...");
           documentText = await extractTextWithOCR(fileBuffer, "application/pdf");
           if (!documentText || documentText.trim().length === 0) {
             console.warn("OCR ile de metin çıkarılamadı - görsel tabanlı PDF, belge kabul edilecek");
@@ -366,7 +366,7 @@ export async function POST(req: NextRequest) {
       try {
         documentText = await extractTextWithOCR(fileBuffer, file.type);
         if (!documentText || documentText.trim().length === 0) {
-          console.warn("Görselden metin çıkarılamadı");
+          console.warn("Could not extract text from image");
         }
       } catch (ocrError: any) {
         console.error("OCR extraction error for image:", ocrError);
@@ -396,7 +396,7 @@ export async function POST(req: NextRequest) {
           
           // Eğer metin çıkarılamazsa, boş metinle devam et
           if (!referenceText || referenceText.trim().length === 0) {
-            console.log("Referans PDF'den metin çıkarılamadı - image-based PDF olabilir");
+            console.log("Could not extract text from reference PDF - may be image-based PDF");
             // Boş metinle devam et
           }
           
@@ -416,7 +416,7 @@ export async function POST(req: NextRequest) {
               console.log("Reference document read from ERP using OCR:", documentName);
             }
           } catch (ocrError) {
-            console.error("Referans belge OCR hatası:", ocrError);
+            console.error("Reference document OCR error:", ocrError);
           }
         }
       }
@@ -480,7 +480,7 @@ export async function POST(req: NextRequest) {
               
               // Eğer metin çıkarılamazsa, boş metinle devam et
               if (!referenceText || referenceText.trim().length === 0) {
-                console.log("Public referans PDF'den metin çıkarılamadı - image-based PDF olabilir");
+                console.log("Could not extract text from public reference PDF - may be image-based PDF");
                 // Boş metinle devam et
               }
               
@@ -501,7 +501,7 @@ export async function POST(req: NextRequest) {
                   console.log("Reference document read from public folder using OCR:", referenceFile);
                 }
               } catch (ocrError) {
-                console.error("Public referans belge OCR hatası:", ocrError);
+                console.error("Public reference document OCR error:", ocrError);
               }
             }
           }
@@ -522,7 +522,7 @@ export async function POST(req: NextRequest) {
       console.log("⚠️ Metin çıkarılamadı ama dosya yüklendi - görsel tabanlı belge, direkt kabul ediliyor");
       return NextResponse.json({
         isValid: true,
-        message: "Belge yüklendi. Görsel tabanlı belge olduğu için metin çıkarılamadı, ancak belge kabul edildi.",
+        message: "Document uploaded. Could not extract text as it appears to be an image-based document, but document was accepted.",
         reason: "Document is image-based, text extraction not possible but document is accepted",
         differences: [],
         hasReference: hasReference,
@@ -725,7 +725,7 @@ Is this document a "${documentName}" type document?
           return NextResponse.json(
             { 
               isValid: true, // Hata durumunda kabul et
-              message: "Belge yüklendi. (Doğrulama API hatası nedeniyle atlandı)",
+              message: "Document uploaded. (Validation skipped due to API error)",
               warning: "Validation API error: " + (errorData.error?.message || JSON.stringify(errorData))
             },
             { status: 200 }
@@ -739,7 +739,7 @@ Is this document a "${documentName}" type document?
           // Hata durumunda kabul et
           return NextResponse.json({
             isValid: true,
-            message: "Belge yüklendi. (Doğrulama yanıt formatı beklenmedik)",
+            message: "Document uploaded. (Unexpected validation response format)",
           });
         }
 
@@ -752,7 +752,7 @@ Is this document a "${documentName}" type document?
           // Parse hatası durumunda kabul et
           return NextResponse.json({
             isValid: true,
-            message: "Belge yüklendi. (Doğrulama yanıtı parse edilemedi)",
+            message: "Document uploaded. (Could not parse validation response)",
           });
         }
 
@@ -768,19 +768,19 @@ Is this document a "${documentName}" type document?
         let message = validationResult.message || "";
         if (!message) {
           message = isValid 
-            ? "Belge doğru formatta görünüyor." 
-            : "Belge yapısı referans belgeyle benzer görünüyor.";
+            ? "Document appears to be in the correct format." 
+            : "Document structure appears similar to reference document.";
         }
 
         // Eğer referans belge kullanıldıysa ve geçersizse, mesajı yumuşat
         if (hasReference && !isValid) {
           // Mesajı daha yumuşak yap
-          message = "Belge yapısı referans belgeyle benzer görünüyor. İçerik farklı olabilir.";
+          message = "Document structure appears similar to reference document. Content may differ.";
         }
         
         // Eğer metin çıkarılamadıysa, mesajı güncelle
         if (!uploadedText || uploadedText.trim().length === 0) {
-          message = "Belge yüklendi. Görsel tabanlı PDF olduğu için metin çıkarılamadı, ancak belge kabul edildi.";
+          message = "Document uploaded. Could not extract text as it appears to be an image-based PDF, but document was accepted.";
           isValid = true;
         }
 
@@ -806,7 +806,7 @@ Is this document a "${documentName}" type document?
         return NextResponse.json(
           { 
             isValid: true,
-            message: "Belge yüklendi. (Doğrulama hatası nedeniyle atlandı)",
+            message: "Document uploaded. (Validation skipped due to error)",
             warning: "Validation error: " + (error.message || "Unknown error"),
           },
           { status: 200 }

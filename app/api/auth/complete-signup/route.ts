@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
     if (!userExists) {
       if (!password) {
         return NextResponse.json(
-          { error: "Şifre bulunamadı. Lütfen tekrar kayıt olun." },
+          { error: "Password not found. Please register again." },
           { status: 400 }
         );
       }
@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
       const userCreate = await erpPost("/api/resource/User", userPayload, token);
       if (userCreate?.exc_type || userCreate?.exception || userCreate?.error) {
         return NextResponse.json(
-          { error: "User oluşturulamadı.", details: userCreate },
+          { error: "Could not create user.", details: userCreate },
           { status: 400 }
         );
       }
@@ -78,7 +78,7 @@ export async function POST(req: NextRequest) {
       const leadCreate = await erpPost("/api/resource/Lead", leadPayload, token);
       if (leadCreate?.exc_type || leadCreate?.exception || leadCreate?.error) {
         return NextResponse.json(
-          { error: "Lead oluşturulamadı.", details: leadCreate },
+          { error: "Could not create lead.", details: leadCreate },
           { status: 400 }
         );
       }
@@ -129,6 +129,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, result });
   } catch (error: any) {
     console.error("complete-signup error:", error);
-    return NextResponse.json({ error: "Sunucu hatası." }, { status: 500 });
+    return NextResponse.json({ error: "Server error." }, { status: 500 });
   }
 }

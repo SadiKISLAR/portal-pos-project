@@ -8,9 +8,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import LanguageSwitcher from "@/components/LanguageSwitcher";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 export default function LoginPage() {
   const router = useRouter();
+  const { t } = useLanguage();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
@@ -130,14 +133,19 @@ export default function LoginPage() {
         router.push("/register/services");
       }
     } catch (err: any) {
-      setError(err.message || "Giriş yapılırken bir hata oluştu");
+      setError(err.message || t("login.errorOccurred"));
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12 sm:px-6 lg:px-8">
+    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12 sm:px-6 lg:px-8 relative">
+      {/* Language Switcher - Top Right */}
+      <div className="absolute top-4 right-4">
+        <LanguageSwitcher />
+      </div>
+      
       <div className="w-full max-w-md">
         <Card className="border-gray-200 shadow-lg">
           <CardHeader className="space-y-1">
@@ -145,7 +153,7 @@ export default function LoginPage() {
               Restaurant Registration
             </CardTitle>
             <CardDescription className="text-sm text-gray-600 mt-2">
-              Please Login to your account.
+              {t("login.title")}
             </CardDescription>
           </CardHeader>
 
@@ -161,7 +169,7 @@ export default function LoginPage() {
             {/* Email Input */}
             <div className="space-y-2">
               <Label htmlFor="email" className="text-sm font-semibold text-gray-700">
-                Email Address
+                {t("login.email")}
               </Label>
               <Input
                 id="email"
@@ -178,7 +186,7 @@ export default function LoginPage() {
             {/* Password Input */}
             <div className="space-y-2">
               <Label htmlFor="password" className="text-sm font-semibold text-gray-700">
-                Password
+                {t("login.password")}
               </Label>
               <Input
                 id="password"
@@ -205,14 +213,14 @@ export default function LoginPage() {
                 htmlFor="remember"
                 className="text-sm font-normal text-gray-700 cursor-pointer"
               >
-                Remember me
+                {t("login.rememberMe")}
               </Label>
             </div>
             <Link
               href="/forgot-password"
               className="text-sm font-medium text-orange-600 hover:text-orange-500 transition-colors"
             >
-              Forgot Password?
+              {t("login.forgotPassword")}
             </Link>
           </div>
 
@@ -222,17 +230,17 @@ export default function LoginPage() {
             disabled={loading}
             className="w-full h-11 text-base font-semibold bg-green-600 hover:bg-green-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {loading ? "Logging in..." : "Login"}
+            {loading ? t("common.loading") : t("login.signIn")}
           </Button>
 
               {/* Register Link */}
               <div className="text-center text-sm text-gray-600">
-                Don&apos;t have an account?{" "}
+                {t("login.noAccount")}{" "}
                 <Link
                   href="/register"
                   className="font-medium text-orange-600 hover:text-orange-500 transition-colors"
                 >
-                  Register here.
+                  {t("login.signUp")}
                 </Link>
               </div>
             </form>

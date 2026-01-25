@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import LanguageSwitcher from "@/components/LanguageSwitcher";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 interface FileWithPreview extends File {
   preview?: string;
@@ -39,6 +41,7 @@ interface DocumentData {
 
 export default function RegistrationDocumentsPage() {
   const router = useRouter();
+  const { t } = useLanguage();
   const { formData, updateFormData, goToStep } = useRegistration();
   const [companyTypes, setCompanyTypes] = useState<CompanyType[]>([]);
   const [selectedCompanyType, setSelectedCompanyType] = useState("");
@@ -259,17 +262,17 @@ export default function RegistrationDocumentsPage() {
 
         if (!data.isValid) {
           // Belge doğru değilse uyarı göster
-          let errorMessage = data.message || "This document is not the expected document type.";
+          let errorMessage = data.message || t("register.documents.notExpectedType");
           
           // Farkları ekle
           if (data.differences && Array.isArray(data.differences) && data.differences.length > 0) {
-            errorMessage += "\n\nDetected differences:\n" + data.differences.map((diff: string, idx: number) => `${idx + 1}. ${diff}`).join("\n");
+            errorMessage += "\n\n" + t("register.documents.detectedDifferences") + "\n" + data.differences.map((diff: string, idx: number) => `${idx + 1}. ${diff}`).join("\n");
           } else if (data.reason) {
             errorMessage += `\n\nDetails: ${data.reason}`;
           }
           
           if (data.hasReference) {
-            errorMessage += "\n\n(Compared with reference document)";
+            errorMessage += "\n\n" + t("register.documents.comparedWithReference");
           }
           
           setDocumentValidationErrors((prev) => ({
@@ -278,7 +281,7 @@ export default function RegistrationDocumentsPage() {
           }));
 
           // Kullanıcıya uyarı göster
-          alert(`⚠️ WARNING: ${file.name}\n\n${errorMessage}\n\nPlease upload the correct document.`);
+          alert(`⚠️ WARNING: ${file.name}\n\n${errorMessage}\n\n${t("register.documents.uploadCorrectDoc")}`);
         } else {
           // Doğru belgeyse hata mesajını temizle
           setDocumentValidationErrors((prev) => {
@@ -288,7 +291,7 @@ export default function RegistrationDocumentsPage() {
           });
         }
       } catch (error: any) {
-        console.error("Belge doğrulama hatası:", error);
+        console.error("Document validation error:", error);
         // Hata olsa bile devam et, sadece logla
       } finally {
         setValidatingDocuments((prev) => {
@@ -452,8 +455,8 @@ export default function RegistrationDocumentsPage() {
   const handleNext = async () => {
     // Validation
     if (!selectedCompanyType) {
-      setError("Please select a company type before proceeding.");
-      alert("Please select a company type");
+      setError(t("register.documents.selectCompanyType"));
+      alert(t("register.documents.selectCompanyType"));
       return;
     }
 
@@ -474,7 +477,7 @@ export default function RegistrationDocumentsPage() {
     }
 
     if (missingDocuments.length > 0) {
-      const errorMessage = `Please upload/fill in the following required documents:\n\n${missingDocuments.map((doc, index) => `${index + 1}. ${doc}`).join("\n")}\n\nAll required documents must be uploaded before you can proceed.`;
+      const errorMessage = `${t("register.documents.uploadRequiredDocs")}\n\n${missingDocuments.map((doc, index) => `${index + 1}. ${doc}`).join("\n")}\n\n${t("register.documents.allRequiredDocs")}`;
       setError(errorMessage);
       alert(errorMessage);
       return;
@@ -508,7 +511,7 @@ export default function RegistrationDocumentsPage() {
     }
 
     if (!userEmail) {
-      alert("User email not found. Please login again.");
+      alert(t("register.documents.userEmailNotFound"));
       setSubmitting(false);
       return;
     }
@@ -552,50 +555,33 @@ export default function RegistrationDocumentsPage() {
               if (parseData.companyInfo.street || parseData.companyInfo.city) extractedFields.push("Address");
               
               if (extractedFields.length > 0) {
-                alert(`✅ PDF başarıyla okundu!\n\nAşağıdaki bilgiler Company Information sayfasına otomatik olarak yüklenecek:\n${extractedFields.join(", ")}`);
+                alert(`✅ ${t("register.documents.pdfReadSuccess")}\n\n${t("register.documents.pdfReadSuccessInfo")}\n${extractedFields.join(", ")}`);
               }
             }
             
-            // PDF'den okunan bilgileri direkt Lead'e de kaydet
-            try {
-              const updateRes = await fetch("/api/erp/update-lead", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  email: userEmail,
-                  companyInfo: parseData.companyInfo
-                }),
-              });
-              
-              const updateData = await updateRes.json();
-              if (updateRes.ok && updateData.success) {
-                console.log("✅ Company info saved to Lead:", updateData);
-              } else {
-                console.warn("⚠️ Failed to save company info to Lead:", updateData);
-              }
-            } catch (updateError) {
-              console.error("❌ Error saving company info to Lead:", updateError);
-              // Devam et, localStorage'da zaten var
-            }
+            // NOT: PDF'den okunan bilgiler sadece localStorage'a kaydedilir
+            // Lead'e kaydetme işlemi Company Information sayfasında submit'e basınca yapılır
+            // Bu sayede adres ve contact'lar erken oluşturulmaz
+            console.log("📋 Company info saved to localStorage only (will be saved to Lead on Company Information submit)");
           } else {
             console.error("❌ PDF parse failed or no company info:", parseData);
             if (parseData.error) {
               console.error("Parse error details:", parseData.error);
               
-              // Kullanıcı dostu hata mesajı
-              let errorMessage = "⚠️ PDF'den bilgiler otomatik olarak okunamadı.\n\n";
+              // User-friendly error message
+              let errorMessage = "⚠️ " + t("register.documents.pdfReadError") + "\n\n";
               
               if (parseData.suggestion) {
                 errorMessage += parseData.suggestion + "\n\n";
               } else {
-                errorMessage += "Bu PDF görsel tabanlı (image-based) olabilir veya metin içermiyor olabilir.\n\n";
+                errorMessage += t("register.documents.pdfImageBased") + "\n\n";
               }
               
-              errorMessage += "Endişelenmeyin! Bilgileri Company Information sayfasında manuel olarak girebilirsiniz.";
+              errorMessage += t("register.documents.pdfReadErrorManual");
               
               alert(errorMessage);
             } else {
-              alert("⚠️ PDF'den bilgi çıkarılamadı.\n\nBilgileri Company Information sayfasında manuel olarak girebilirsiniz.");
+              alert("⚠️ " + t("register.documents.pdfExtractError") + "\n\n" + t("register.documents.pdfReadErrorManual"));
             }
           }
         } catch (parseError) {
@@ -672,23 +658,28 @@ export default function RegistrationDocumentsPage() {
         router.push("/register/payment-information");
       } else {
         console.error("Update lead error:", data);
-        const errorMsg = data.error || "Failed to save documents";
+        const errorMsg = data.error || t("register.documents.failedToSave");
         setError(errorMsg);
         alert(errorMsg);
       }
     } catch (error: any) {
       console.error("Error uploading documents:", error);
       console.error("Error details:", error.message, error.stack);
-      const errorMessage = error.message || "Please try again.";
+      const errorMessage = error.message || t("common.error");
       setError(errorMessage);
-      alert(`Failed to upload documents: ${errorMessage}`);
+      alert(`${t("register.documents.failedToUpload")} ${errorMessage}`);
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 px-4 py-12 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-gray-50 px-4 py-12 sm:px-6 lg:px-8 relative">
+      {/* Language Switcher - Top Right */}
+      <div className="absolute top-4 right-4">
+        <LanguageSwitcher />
+      </div>
+      
       <div className="max-w-4xl mx-auto">
         <Card className="border-gray-200 shadow-lg">
           <CardContent className="p-8">
@@ -697,15 +688,15 @@ export default function RegistrationDocumentsPage() {
 
             {/* Section Title */}
             <div className="mb-8">
-              <h1 className="text-2xl font-bold text-gray-900 mb-2">Registration Documents</h1>
+              <h1 className="text-2xl font-bold text-gray-900 mb-2">{t("register.documents.title")}</h1>
               <p className="text-sm text-gray-600">
-                Please upload the required documents to complete your registration
+                {t("register.documents.subtitle")}
               </p>
             </div>
 
             {errorText && (
               <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
-                <div className="font-semibold mb-2">⚠️ Please complete the following:</div>
+                <div className="font-semibold mb-2">⚠️ {t("register.documents.pleaseComplete")}</div>
                 <div className="whitespace-pre-line">{errorText}</div>
               </div>
             )}
@@ -714,7 +705,7 @@ export default function RegistrationDocumentsPage() {
             {parsingPdf && (
               <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg text-blue-700 text-sm flex items-center gap-2">
                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-700"></div>
-                <span>Business Registration Document okunuyor, lütfen bekleyin...</span>
+                <span>{t("register.documents.readingPdf")}</span>
               </div>
             )}
 
@@ -722,7 +713,7 @@ export default function RegistrationDocumentsPage() {
               {/* Type of Company */}
               <div className="space-y-2">
                 <Label htmlFor="companyType" className="text-sm font-semibold text-gray-700">
-                  Type of Company <span className="text-red-500">*</span>
+                  {t("register.documents.typeOfCompany")} <span className="text-red-500">*</span>
                 </Label>
                 <select
                   id="companyType"
@@ -732,7 +723,7 @@ export default function RegistrationDocumentsPage() {
                   className="w-full h-10 px-3 rounded-md border border-gray-300 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-green-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
                 >
                   <option value="">
-                    {loadingCompanyTypes ? "Loading..." : "Select"}
+                    {loadingCompanyTypes ? t("common.loading") : t("register.documents.select")}
                   </option>
                   {companyTypes.map((ct) => (
                     <option key={ct.id} value={ct.id}>
@@ -750,7 +741,7 @@ export default function RegistrationDocumentsPage() {
               {/* Required Documents */}
               {loadingDocuments && (
                 <div className="text-center py-4 text-gray-600">
-                  Loading required documents...
+                  {t("register.documents.loadingDocuments")}
                 </div>
               )}
 
@@ -789,8 +780,7 @@ export default function RegistrationDocumentsPage() {
                                 letterSpacing: '0',
                               }}
                             >
-                              You can upload multiple files - up to {doc.maxFiles} files are possible.
-                              Allowed formats: {doc.allowedFileTypes}
+                              {t("register.documents.multipleFiles").replace("{count}", String(doc.maxFiles))} {t("register.documents.allowedFormats")} {doc.allowedFileTypes}
                             </p>
 
                             <div
@@ -799,8 +789,8 @@ export default function RegistrationDocumentsPage() {
                               onDrop={(e) => handleDrop(e, doc.id, doc.maxFiles)}
                               onClick={() => handleFileInputClick(doc.id)}
                             >
-                              <p className="text-sm text-gray-600 mb-2">Drag and drop files here</p>
-                              <p className="text-sm text-gray-600 mb-4">or</p>
+                              <p className="text-sm text-gray-600 mb-2">{t("register.documents.dragDrop")}</p>
+                              <p className="text-sm text-gray-600 mb-4">{t("register.documents.dragDropOr")}</p>
                               <div className="flex flex-col items-center gap-2">
                                 <Button
                                   type="button"
@@ -809,20 +799,20 @@ export default function RegistrationDocumentsPage() {
                                   style={{
                                     backgroundColor: '#111827',
                                     borderRadius: '10px',
-                                    width: '63px',
-                                    height: '24px',
+                                    minWidth: '90px',
+                                    height: '28px',
                                     fontSize: '14px',
-                                    padding: '0',
+                                    padding: '0 12px',
                                   }}
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     handleFileInputClick(doc.id);
                                   }}
                                 >
-                                  Upload
+                                  {t("register.documents.upload")}
                                 </Button>
                                 <p className="text-xs" style={{ color: '#F4A023' }}>
-                                  Maximum file size: 5MB. Accepted formats: {doc.allowedFileTypes}.
+                                  {t("register.documents.maxSizeWithFormats")} {doc.allowedFileTypes}.
                                 </p>
                               </div>
                               <input
@@ -878,12 +868,12 @@ export default function RegistrationDocumentsPage() {
                                           }}
                                           className="text-red-500 hover:text-red-700 text-sm ml-2 flex-shrink-0"
                                         >
-                                          Remove
+                                          {t("register.documents.remove")}
                                         </button>
                                       </div>
                                       {validationError && (
                                         <div className="p-3 bg-red-50 border border-red-300 rounded text-red-800 text-xs">
-                                          <div className="font-semibold mb-1">⚠️ This document is not in the correct format:</div>
+                                          <div className="font-semibold mb-1">⚠️ {t("register.documents.wrongFormat")}</div>
                                           <div className="whitespace-pre-line">{validationError}</div>
                                         </div>
                                       )}
@@ -902,7 +892,7 @@ export default function RegistrationDocumentsPage() {
 
               {!loadingDocuments && selectedCompanyType && requiredDocuments.length === 0 && (
                 <div className="text-center py-4 text-gray-600">
-                  No required documents found for this company type.
+                  {t("register.documents.noDocumentsRequired")}
                 </div>
               )}
 
@@ -915,18 +905,16 @@ export default function RegistrationDocumentsPage() {
                   className="px-8 h-[50px] text-base font-semibold border-gray-300 text-gray-700 hover:bg-gray-50"
                   style={{ width: "343px" }}
                 >
-                  Back
+                  {t("common.back")}
                 </Button>
                 <RegisterButton type="button" onClick={handleNext} disabled={!selectedCompanyType || requiredDocuments.length === 0 || submitting || parsingPdf}>
-                  {parsingPdf ? (
+                  {(parsingPdf || submitting) ? (
                     <>
                       <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                      PDF Okunuyor...
+                      {t("common.loading")}
                     </>
-                  ) : submitting ? (
-                    "Uploading..."
                   ) : (
-                    "Next"
+                    t("common.next")
                   )}
                 </RegisterButton>
               </div>

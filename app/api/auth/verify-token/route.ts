@@ -6,7 +6,7 @@ export async function POST(req: NextRequest) {
     const { token: verificationToken } = await req.json();
 
     if (!verificationToken) {
-      return NextResponse.json({ error: "Token bulunamadı." }, { status: 400 });
+      return NextResponse.json({ error: "Token not found." }, { status: 400 });
     }
 
     const apiToken = process.env.ERP_API_TOKEN;
@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
     );
 
     if (data?.exc_type || data?.exception || data?.error) {
-        let msg = "Doğrulama başarısız.";
+        let msg = "Verification failed.";
         if (data?._server_messages) {
             try {
                 const msgs = JSON.parse(data._server_messages);
@@ -30,9 +30,9 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: msg }, { status: 400 });
     }
 
-    return NextResponse.json({ success: true, message: "Doğrulama başarılı.", data });
+    return NextResponse.json({ success: true, message: "Verification successful.", data });
 
   } catch (error) {
-    return NextResponse.json({ error: "ERP bağlantı hatası." }, { status: 500 });
+    return NextResponse.json({ error: "ERP connection error." }, { status: 500 });
   }
 }

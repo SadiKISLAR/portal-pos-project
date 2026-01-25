@@ -12,9 +12,12 @@ import RegisterButton from "@/components/RegisterButton";
 import { Eye, EyeOff, CheckCircle, Mail, Loader2, FileText } from "lucide-react";
 import PhoneInput from "react-phone-number-input";
 import "react-phone-number-input/style.css";
+import LanguageSwitcher from "@/components/LanguageSwitcher";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 export default function RegisterPage() {
   const router = useRouter();
+  const { t } = useLanguage();
   
   // E-posta gönderildi mi durumunu kontrol eden state
   const [isEmailSent, setIsEmailSent] = useState(false);
@@ -224,24 +227,29 @@ export default function RegisterPage() {
   // --- EĞER MAIL GÖNDERİLDİYSE BU EKRANI GÖSTER ---
   if (isEmailSent) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12">
+      <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12 relative">
+        {/* Language Switcher - Top Right */}
+        <div className="absolute top-4 right-4">
+          <LanguageSwitcher />
+        </div>
+        
         <Card className="w-full max-w-md border-gray-200 shadow-lg text-center">
           <CardContent className="pt-10 pb-10 flex flex-col items-center">
             <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
               <Mail className="w-8 h-8 text-green-600" />
             </div>
-            <h2 className="text-2xl font-bold text-gray-800 mb-2">Check Your Email</h2>
+            <h2 className="text-2xl font-bold text-gray-800 mb-2">{t("signup.emailSent")}</h2>
             <p className="text-gray-600 mb-6 px-4">
-              We&apos;ve sent a verification link to <strong>{formData.email}</strong>.
+              {t("signup.checkEmail")}
               <br /><br />
-              Please click the link in your inbox (or spam folder) to complete your registration.
+              <strong>{formData.email}</strong>
             </p>
             <Button 
               variant="outline" 
-              onClick={() => router.push("/login")}
+              onClick={() => router.push("/")}
               className="w-full"
             >
-              Return to Login
+              {t("login.signIn")}
             </Button>
           </CardContent>
         </Card>
@@ -251,7 +259,12 @@ export default function RegisterPage() {
 
   // --- NORMAL KAYIT FORMU ---
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12 sm:px-6 lg:px-8">
+    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12 sm:px-6 lg:px-8 relative">
+      {/* Language Switcher - Top Right */}
+      <div className="absolute top-4 right-4">
+        <LanguageSwitcher />
+      </div>
+      
       <div className="w-full max-w-2xl">
         <Card className="border-gray-200 shadow-lg">
           <CardHeader className="space-y-1">
@@ -259,7 +272,7 @@ export default function RegisterPage() {
               Restaurant Registration
             </CardTitle>
             <p className="text-sm text-gray-600 mt-2">
-              <span className="text-red-500">*</span> Indicates required fields
+              <span className="text-red-500">*</span> {t("common.required")}
             </p>
           </CardHeader>
 

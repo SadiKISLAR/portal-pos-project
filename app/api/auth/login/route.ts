@@ -8,7 +8,7 @@ export async function POST(req: NextRequest) {
 
     if (!email || !password) {
       return NextResponse.json(
-        { error: "Email ve şifre zorunludur." },
+        { error: "Email and password are required." },
         { status: 400 }
       );
     }
@@ -19,14 +19,14 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: "Giriş başarılı",
+      message: "Login successful",
       user: result, // ERP'den dönen user bilgisi
     });
 
   } catch (error: any) {
     console.error("Login error:", error.message);
     return NextResponse.json(
-      { error: error.message || "Giriş başarısız. Bilgilerinizi kontrol edin." },
+      { error: error.message || "Login failed. Please check your credentials." },
       { status: 401 }
     );
   }

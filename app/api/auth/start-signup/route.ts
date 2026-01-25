@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
     const token = process.env.ERP_API_TOKEN;
 
     if (!token) {
-      return NextResponse.json({ error: "Sunucu ayarları eksik (.env kontrol edin)." }, { status: 500 });
+      return NextResponse.json({ error: "Server configuration missing (check .env)." }, { status: 500 });
     }
 
     // Frontend URL'ini environment variable'dan al, yoksa varsayılan olarak Vercel URL'ini kullan
@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
 
     if (data?.exc_type || data?.exception || data?.error) {
       // ERP'den dönen hatayı okunaklı hale getir
-      let errorMessage = "Bir hata oluştu.";
+      let errorMessage = "An error occurred.";
       if (data?._server_messages) {
         try {
           const msgs = JSON.parse(data._server_messages);
@@ -46,11 +46,11 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ 
         success: true, 
-        message: data.message?.message || "Doğrulama e-postası ERP tarafından gönderildi." 
+        message: data.message?.message || "Verification email sent by ERP." 
     });
 
   } catch (error: any) {
     console.error("Proxy error:", error);
-    return NextResponse.json({ error: "ERP sunucusuna bağlanılamadı." }, { status: 500 });
+    return NextResponse.json({ error: "Could not connect to ERP server." }, { status: 500 });
   }
 }
