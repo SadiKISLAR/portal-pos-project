@@ -13,6 +13,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import BrandProgressBar from "@/components/BrandProgressBar";
 import dynamic from "next/dynamic";
 import { Clock, Plus, Trash2, Pencil, Calendar } from "lucide-react";
+import LanguageSwitcher from "@/components/LanguageSwitcher";
 
 // Harita komponenti dinamik import (SSR devre dışı)
 const DeliveryMap = dynamic(() => import("@/components/DeliveryMap"), {
@@ -279,8 +280,9 @@ export default function DeliveryMethodPage() {
 
   // Cleanup timeouts on unmount
   useEffect(() => {
+    const timeoutRefs = postcodeTimeoutRefs.current;
     return () => {
-      Object.values(postcodeTimeoutRefs.current).forEach((timeout) => {
+      Object.values(timeoutRefs).forEach((timeout) => {
         if (timeout) clearTimeout(timeout);
       });
     };
@@ -459,7 +461,12 @@ export default function DeliveryMethodPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 relative">
+      {/* Language Switcher - Top Right */}
+      <div className="absolute top-4 right-4 z-10">
+        <LanguageSwitcher />
+      </div>
+      
       <BrandProgressBar currentStep={2} />
 
       <div className="max-w-6xl mx-auto px-4 py-6">

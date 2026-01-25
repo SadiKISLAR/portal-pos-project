@@ -9,6 +9,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import LanguageSwitcher from "@/components/LanguageSwitcher";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 // Types
 interface ServiceContract {
@@ -30,6 +32,7 @@ const DEFAULT_TERMS_OF_USE = `By agreeing, you declare that you have read, fully
 
 export default function ServicesPage() {
   const router = useRouter();
+  const { t } = useLanguage();
   const { formData, updateFormData, goToStep } = useRegistration();
   const [services, setServices] = useState<Service[]>([]);
   const [selectedServices, setSelectedServices] = useState<string[]>([]); // ID listesi
@@ -278,20 +281,25 @@ export default function ServicesPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 px-4 py-12 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-gray-50 px-4 py-12 sm:px-6 lg:px-8 relative">
+      {/* Language Switcher - Top Right */}
+      <div className="absolute top-4 right-4">
+        <LanguageSwitcher />
+      </div>
+      
       <div className="max-w-4xl mx-auto">
         <ProgressBar />
         <div className="mb-8 mt-8 ml-2">
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Services</h1>
-          <p className="text-sm text-gray-600">Please select services.</p>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">{t("register.services.title")}</h1>
+          <p className="text-sm text-gray-600">{t("register.services.subtitle")}</p>
         </div>
 
         {loading ? (
-           <div className="text-center py-12">Loading...</div>
+           <div className="text-center py-12">{t("common.loading")}</div>
         ) : services.length === 0 ? (
           <div className="text-center py-12">
-            <p className="text-gray-600 mb-4">No services found.</p>
-            <p className="text-sm text-gray-500">Please check the browser console for details.</p>
+            <p className="text-gray-600 mb-4">{t("register.services.noServicesFound")}</p>
+            <p className="text-sm text-gray-500">{t("register.services.checkConsole")}</p>
           </div>
         ) : (
           <div className="space-y-8">
@@ -322,18 +330,18 @@ export default function ServicesPage() {
                              {service.description || "No description."}
                            </div>
                            <label className={`text-sm font-medium cursor-pointer ${isSelected ? "text-green-600" : "text-gray-500"}`} onClick={() => handleServiceToggle(service.id)}>
-                             {isSelected ? "Service Selected" : "Click to select"}
+                             {isSelected ? t("register.services.servicesSelected") : t("register.services.selectAll")}
                            </label>
                         </div>
                       </div>
                     </div>
                     {isSelected && (
                       <div className="border-t border-gray-200 bg-gray-50 p-6">
-                        <h4 className="text-sm font-semibold mb-3">Terms of Use</h4>
+                        <h4 className="text-sm font-semibold mb-3">{t("register.services.termsOfUse")}</h4>
                         <div className="bg-white border rounded-md p-4 max-h-48 overflow-y-auto mb-4 text-sm text-gray-600">{DEFAULT_TERMS_OF_USE}</div>
                         <div className="flex items-center gap-3">
                           <Checkbox checked={acceptedTerms[service.id] || false} onCheckedChange={(checked) => handleTermsToggle(service.id, checked === true)} />
-                          <Label className="text-sm font-medium cursor-pointer">I accept the Terms of Use for {service.name}.</Label>
+                          <Label className="text-sm font-medium cursor-pointer">{t("register.services.termsAccept")} - {service.name}</Label>
                         </div>
                       </div>
                     )}
@@ -344,8 +352,8 @@ export default function ServicesPage() {
           </div>
         )}
         <div className="flex justify-center gap-4 pt-10 pb-8">
-          <Button onClick={handleBack} variant="outline" className="px-8 h-[50px] w-[200px]">Back</Button>
-          <RegisterButton onClick={handleNext} className="w-[200px]">Next</RegisterButton>
+          <Button onClick={handleBack} variant="outline" className="px-8 h-[50px] w-[200px]">{t("common.back")}</Button>
+          <RegisterButton onClick={handleNext} className="w-[200px]">{t("common.next")}</RegisterButton>
         </div>
       </div>
     </div>

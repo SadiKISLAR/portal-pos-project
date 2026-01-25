@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import LanguageSwitcher from "@/components/LanguageSwitcher";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 // IBAN Validation function using Mod-97 algorithm
 function validateIBAN(iban: string): boolean {
@@ -53,6 +55,7 @@ function validateIBAN(iban: string): boolean {
 
 export default function PaymentInformationPage() {
   const router = useRouter();
+  const { t } = useLanguage();
   const { formData, updateFormData, goToStep } = useRegistration();
   const [paymentData, setPaymentData] = useState({
     accountHolder: "",
@@ -118,7 +121,7 @@ export default function PaymentInformationPage() {
             if (validateIBAN(lead.custom_iban)) {
               setIbanError("");
             } else {
-              setIbanError("Geçerli bir IBAN giriniz");
+              setIbanError(t("register.payment.ibanError"));
             }
           }
         }
@@ -127,6 +130,7 @@ export default function PaymentInformationPage() {
       console.error("Error loading payment info:", error);
       // Hata olsa bile devam et, form boş kalabilir
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -153,7 +157,7 @@ export default function PaymentInformationPage() {
         if (validateIBAN(value)) {
           setIbanError("");
         } else {
-          setIbanError("Geçerli bir IBAN giriniz");
+          setIbanError(t("register.payment.ibanError"));
         }
       } else {
         setIbanError("");
@@ -169,14 +173,14 @@ export default function PaymentInformationPage() {
   const handleNext = async () => {
     // Validate all fields
     if (!paymentData.accountHolder || !paymentData.iban || !paymentData.bic) {
-      alert("Please fill in all required fields");
+      alert(t("register.payment.allFieldsRequired"));
       return;
     }
 
     // Validate IBAN
     if (!validateIBAN(paymentData.iban)) {
       setIbanTouched(true);
-      setIbanError("Geçerli bir IBAN giriniz");
+      setIbanError(t("register.payment.ibanError"));
       return;
     }
 
@@ -204,7 +208,7 @@ export default function PaymentInformationPage() {
     }
 
     if (!userEmail) {
-      alert("User email not found. Please login or complete the initial registration first.");
+      alert(t("register.payment.userEmailNotFound"));
       return;
     }
 
@@ -232,13 +236,13 @@ export default function PaymentInformationPage() {
 
       if (!res.ok || !data.success) {
         console.error("API Error:", data);
-        alert(data.error || "Failed to update lead. Please try again.");
+        alert(data.error || t("register.payment.updateFailed"));
         return;
       }
 
     } catch (error) {
       console.error("Payment information update failed:", error);
-      alert("Failed to update payment information. Please try again.");
+      alert(t("register.payment.updateFailed"));
       return;
     }
 
@@ -248,7 +252,12 @@ export default function PaymentInformationPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 px-4 py-12 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-gray-50 px-4 py-12 sm:px-6 lg:px-8 relative">
+      {/* Language Switcher - Top Right */}
+      <div className="absolute top-4 right-4">
+        <LanguageSwitcher />
+      </div>
+      
       <div className="max-w-4xl mx-auto">
         <Card className="border-gray-200 shadow-lg">
           <CardContent className="p-8">
@@ -257,9 +266,9 @@ export default function PaymentInformationPage() {
 
             {/* Section Title */}
             <div className="mb-8">
-              <h1 className="text-2xl font-bold text-gray-900 mb-2">Payment Information</h1>
+              <h1 className="text-2xl font-bold text-gray-900 mb-2">{t("register.payment.title")}</h1>
               <p className="text-sm text-gray-600">
-                Please provide your company payment information details
+                {t("register.payment.subtitle")}
               </p>
             </div>
 
@@ -269,11 +278,11 @@ export default function PaymentInformationPage() {
                 {/* Account Holder */}
                 <div className="space-y-2">
                   <Label htmlFor="accountHolder" className="text-sm font-semibold text-gray-700">
-                    Account Holder <span className="text-red-500">*</span>
+                    {t("register.payment.accountHolder")} <span className="text-red-500">*</span>
                   </Label>
                   <Input
                     id="accountHolder"
-                    placeholder="Enter"
+                    placeholder={t("register.payment.enterAccountHolder")}
                     value={paymentData.accountHolder}
                     onChange={(e) => handleChange("accountHolder", e.target.value)}
                     className="w-full"
@@ -285,12 +294,12 @@ export default function PaymentInformationPage() {
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
                     <Label htmlFor="iban" className="text-sm font-semibold text-gray-700">
-                      IBAN <span className="text-red-500">*</span>
+                      {t("register.payment.iban")} <span className="text-red-500">*</span>
                     </Label>
                   </div>
                   <Input
                     id="iban"
-                    placeholder="Enter"
+                    placeholder={t("register.payment.enterIban")}
                     value={paymentData.iban}
                     onChange={(e) => handleChange("iban", e.target.value)}
                     className={`w-full ${ibanError && ibanTouched ? "border-red-500" : ""}`}
@@ -304,11 +313,11 @@ export default function PaymentInformationPage() {
                 {/* BIC */}
                 <div className="space-y-2">
                   <Label htmlFor="bic" className="text-sm font-semibold text-gray-700">
-                    BIC <span className="text-red-500">*</span>
+                    {t("register.payment.bic")} <span className="text-red-500">*</span>
                   </Label>
                   <Input
                     id="bic"
-                    placeholder="Enter"
+                    placeholder={t("register.payment.enterBic")}
                     value={paymentData.bic}
                     onChange={(e) => handleChange("bic", e.target.value)}
                     className="w-full"
@@ -326,10 +335,10 @@ export default function PaymentInformationPage() {
                   className="px-8 h-[50px] text-base font-semibold border-gray-300 text-gray-700 hover:bg-gray-50"
                   style={{ width: "343px" }}
                 >
-                  Back
+                  {t("common.back")}
                 </Button>
                 <RegisterButton type="button" onClick={handleNext}>
-                  Next
+                  {t("common.next")}
                 </RegisterButton>
               </div>
             </form>

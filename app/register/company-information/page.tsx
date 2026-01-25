@@ -18,6 +18,8 @@ import countries from "i18n-iso-countries";
 import en from "i18n-iso-countries/langs/en.json";
 import tr from "i18n-iso-countries/langs/tr.json";
 import de from "i18n-iso-countries/langs/de.json";
+import LanguageSwitcher from "@/components/LanguageSwitcher";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 countries.registerLocale(en);
 countries.registerLocale(tr);
@@ -33,6 +35,7 @@ const getCountryIsoCode = (countryName?: string): Country | undefined => {
 
 export default function CompanyInformationPage() {
   const router = useRouter();
+  const { t } = useLanguage();
   const { formData, updateFormData, goToStep } = useRegistration();
   const [restaurantCount, setRestaurantCount] = useState(
     formData.companyInfo.restaurantCount || "1"
@@ -340,48 +343,32 @@ export default function CompanyInformationPage() {
           }
 
           // Lead'den businesses yükle, ama PDF'den okunan bilgiler öncelikli
-          if (lead.businesses && Array.isArray(lead.businesses) && lead.businesses.length > 0) {
-            // Eğer parsedCompanyInfo varsa, PDF bilgilerini lead.businesses ile merge et
-            if (parsedCompanyInfo && (parsedCompanyInfo.ownerDirector || parsedCompanyInfo.businessName)) {
-              const mergedBusinesses = lead.businesses.map((biz: any, index: number) => {
-                if (index === 0) {
-                  // İlk business için PDF bilgileri öncelikli
-                  return {
-                    ...biz,
-                    businessName: parsedCompanyInfo.businessName || biz.businessName || "",
-                    ownerDirector: parsedCompanyInfo.ownerDirector || biz.ownerDirector || "",
-                    ownerEmail: parsedCompanyInfo.ownerEmail || biz.ownerEmail || "",
-                    ownerTelephone: parsedCompanyInfo.ownerTelephone || biz.ownerTelephone || "",
-                    street: parsedCompanyInfo.street || biz.street || "",
-                    city: parsedCompanyInfo.city || biz.city || "",
-                    postalCode: parsedCompanyInfo.zipCode || biz.postalCode || "",
-                    country: parsedCompanyInfo.country || biz.country || "",
-                    federalState: parsedCompanyInfo.federalState || biz.federalState || "",
-                  };
-                }
-                return biz;
-              });
-              setBusinesses(mergedBusinesses);
-            } else {
-              setBusinesses(lead.businesses);
-            }
-          } else if (parsedCompanyInfo && (parsedCompanyInfo.ownerDirector || parsedCompanyInfo.businessName)) {
-            // Lead'de businesses yoksa ama parsedCompanyInfo varsa, yeni business oluştur
+          // ÖNEMLİ: Yeni PDF yüklendiğinde eski contact bilgileri korunmamalı
+          if (parsedCompanyInfo) {
+            // PDF'den bilgi varsa, tamamen yeni business oluştur (eski contact bilgilerini SİL)
+            console.log("📄 Creating fresh business from PDF (clearing old contact info)");
             setBusinesses([{
               businessName: parsedCompanyInfo.businessName || "",
               ownerDirector: parsedCompanyInfo.ownerDirector || "",
               ownerTelephone: parsedCompanyInfo.ownerTelephone || "",
               ownerEmail: parsedCompanyInfo.ownerEmail || "",
               differentContact: false,
-              contactPerson: "",
-              contactTelephone: "",
-              contactEmail: "",
+              contactPerson: "", // Eski contact bilgileri temizlendi
+              contactTelephone: "", // Eski contact bilgileri temizlendi
+              contactEmail: "", // Eski contact bilgileri temizlendi
               street: parsedCompanyInfo.street || "",
               city: parsedCompanyInfo.city || "",
               postalCode: parsedCompanyInfo.zipCode || "",
               federalState: parsedCompanyInfo.federalState || "",
               country: parsedCompanyInfo.country || "",
             }]);
+            
+            // PDF işlendikten sonra localStorage'dan sil (bir kere kullanılsın)
+            localStorage.removeItem("parsedCompanyInfo");
+            console.log("🗑️ parsedCompanyInfo removed from localStorage after use");
+          } else if (lead.businesses && Array.isArray(lead.businesses) && lead.businesses.length > 0) {
+            // PDF yoksa Lead'den businesses yükle
+            setBusinesses(lead.businesses);
           }
         }
       } catch (error) {
@@ -391,6 +378,7 @@ export default function CompanyInformationPage() {
     };
 
     loadCompanyInfo();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [updateFormData]);
 
   const handleCompanyInfoChange = (field: keyof typeof formData.companyInfo, value: string) => {
@@ -433,8 +421,12 @@ export default function CompanyInformationPage() {
   };
 
   const handleSubmit = async () => {
+    // Debug: check formData values
+    console.log("📋 Current formData.companyInfo:", formData.companyInfo);
+    
     if (!formData.companyInfo.companyName || !formData.companyInfo.vatIdentificationNumber) {
-      alert("Please fill in required fields");
+      console.log("❌ Validation failed - companyName:", formData.companyInfo.companyName, "vatNumber:", formData.companyInfo.vatIdentificationNumber);
+      alert(t("register.company.fillRequiredFields"));
       return;
     }
 
@@ -462,7 +454,7 @@ export default function CompanyInformationPage() {
     }
 
     if (!userEmail) {
-      alert("User email not found. Please login or complete the initial registration first.");
+      alert(t("register.company.userEmailNotFound"));
       return;
     }
 
@@ -489,6 +481,12 @@ export default function CompanyInformationPage() {
       if (formData.companyInfo.federalState) cleanCompanyInfo.federalState = formData.companyInfo.federalState;
       if (formData.companyInfo.zipCode) cleanCompanyInfo.zipCode = formData.companyInfo.zipCode;
       
+      // Debug: Log what we're sending
+      console.log("📤 Submitting company information:");
+      console.log("  - Email:", userEmail);
+      console.log("  - cleanCompanyInfo:", JSON.stringify(cleanCompanyInfo, null, 2));
+      console.log("  - businesses:", JSON.stringify(businesses, null, 2));
+      
       // Registration status'u "Completed" olarak işaretle (son sayfa)
       const res = await fetch("/api/erp/update-lead", {
         method: "POST",
@@ -506,11 +504,15 @@ export default function CompanyInformationPage() {
       });
 
       const data = await res.json();
+      console.log("📥 Update lead response:", data);
 
       if (!res.ok || !data.success) {
-        alert(data.error || "Failed to update lead in ERP. Please try again.");
+        console.error("❌ Update lead failed:", data);
+        alert(data.error || t("register.company.updateFailed"));
         return;
       }
+      
+      console.log("✅ Lead updated successfully");
       
       // Company info'yu localStorage'a kaydet (validation için)
       try {
@@ -520,12 +522,19 @@ export default function CompanyInformationPage() {
         console.error("❌ Error saving companyInfo to localStorage:", e);
       }
       
+      // parsedCompanyInfo'yu temizle (artık kaydedildi)
+      try {
+        localStorage.removeItem("parsedCompanyInfo");
+        console.log("✅ Cleared parsedCompanyInfo from localStorage");
+      } catch (e) {}
+      
       // Registration tamamlandı, dashboard'a yönlendir
-      alert("Registration completed successfully! Redirecting to dashboard...");
+      console.log("🚀 Registration completed! Redirecting to dashboard...");
+      alert(t("register.company.registrationCompleted"));
       router.push("/dashboard");
       
     } catch (error) {
-      alert("Failed to update lead in ERP. Please try again.");
+      alert(t("register.company.updateFailed"));
       return;
     }
   };
@@ -536,13 +545,18 @@ export default function CompanyInformationPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 px-4 py-12 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-gray-50 px-4 py-12 sm:px-6 lg:px-8 relative">
+      {/* Language Switcher - Top Right */}
+      <div className="absolute top-4 right-4">
+        <LanguageSwitcher />
+      </div>
+      
       <div className="max-w-4xl mx-auto">
         <ProgressBar />
         
         <div className="mb-8 mt-8 ml-10">
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Company Information</h1>
-          <p className="text-sm text-gray-600">Please provide your company details to get started</p>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">{t("register.company.title")}</h1>
+          <p className="text-sm text-gray-600">{t("register.company.subtitle")}</p>
         </div>
         
         <Card className="border-gray-200 shadow-lg">
@@ -553,11 +567,11 @@ export default function CompanyInformationPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="companyName" className="text-sm font-semibold text-gray-700">
-                      Company Name <span className="text-red-500">*</span>
+                      {t("register.company.companyName")} <span className="text-red-500">*</span>
                     </Label>
                     <Input
                       id="companyName"
-                      placeholder="Enter Company Name"
+                      placeholder={t("register.company.enterCompanyName")}
                       value={formData.companyInfo.companyName}
                       onChange={(e) => handleCompanyInfoChange("companyName", e.target.value)}
                       className="w-full"
@@ -566,11 +580,11 @@ export default function CompanyInformationPage() {
 
                   <div className="space-y-2">
                     <Label htmlFor="vatId" className="text-sm font-semibold text-gray-700">
-                      VAT Identification Number <span className="text-red-500">*</span>
+                      {t("register.company.vatNumber")} <span className="text-red-500">*</span>
                     </Label>
                     <Input
                       id="vatId"
-                      placeholder="e.g. DE123456789"
+                      placeholder={t("register.company.enterVatNumber")}
                       value={formData.companyInfo.vatIdentificationNumber}
                       onChange={(e) => handleCompanyInfoChange("vatIdentificationNumber", e.target.value)}
                       className="w-full"
@@ -581,11 +595,11 @@ export default function CompanyInformationPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="taxIdNumber" className="text-sm font-semibold text-gray-700">
-                      Tax ID Number <span className="text-red-500">*</span>
+                      {t("register.company.taxId")} <span className="text-red-500">*</span>
                     </Label>
                     <Input
                       id="taxIdNumber"
-                      placeholder="Enter Tax ID Number"
+                      placeholder={t("register.company.enterTaxId")}
                       value={formData.companyInfo.taxIdNumber}
                       onChange={(e) => handleCompanyInfoChange("taxIdNumber", e.target.value)}
                       className="w-full"
@@ -595,7 +609,7 @@ export default function CompanyInformationPage() {
 
                 <div className="space-y-2">
                   <Label htmlFor="companyStreet" className="text-sm font-semibold text-gray-700">
-                    Street and House number
+                    {t("register.company.street")}
                   </Label>
                   <AddressAutocomplete
                     value={formData.companyInfo.street}
@@ -606,7 +620,7 @@ export default function CompanyInformationPage() {
                         handleCompanyInfoChange("street", address);
                       }
                     }}
-                    placeholder="Enter Location"
+                    placeholder={t("register.company.enterLocation")}
                     className="w-full"
                     required
                   />
@@ -615,19 +629,19 @@ export default function CompanyInformationPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="companyCity" className="text-sm font-semibold text-gray-700">
-                      City
+                      {t("register.company.city")}
                     </Label>
                     <AddressAutocomplete
                       value={formData.companyInfo.city}
                       onChange={(address) => handleCompanyInfoChange("city", address)}
-                      placeholder="Enter City"
+                      placeholder={t("register.company.enterCity")}
                       className="w-full"
                       fieldType="city"
                     />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="companyCountry" className="text-sm font-semibold text-gray-700">
-                      Country <span className="text-red-500">*</span>
+                      {t("register.company.country")} <span className="text-red-500">*</span>
                     </Label>
                     <AddressAutocomplete
                       value={formData.companyInfo.country}
@@ -635,7 +649,7 @@ export default function CompanyInformationPage() {
                         handleCompanyInfoChange("country", address);
                         handleCompanyInfoChange("federalState", "");
                       }}
-                      placeholder="Enter Country"
+                      placeholder={t("register.company.enterCountry")}
                       className="w-full"
                       fieldType="country"
                       required
@@ -646,12 +660,12 @@ export default function CompanyInformationPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="companyState" className="text-sm font-semibold text-gray-700">
-                      Federal State <span className="text-red-500">*</span>
+                      {t("register.company.federalState")} <span className="text-red-500">*</span>
                     </Label>
                     <AddressAutocomplete
                       value={formData.companyInfo.federalState}
                       onChange={(address) => handleCompanyInfoChange("federalState", address)}
-                      placeholder="Enter Federal State"
+                      placeholder={t("register.company.enterState")}
                       className="w-full"
                       fieldType="state"
                       countryRestriction={formData.companyInfo.country}
@@ -660,12 +674,12 @@ export default function CompanyInformationPage() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="companyPostalCode" className="text-sm font-semibold text-gray-700">
-                      Postal code
+                      {t("register.company.postalCode")}
                     </Label>
                     <AddressAutocomplete
                       value={formData.companyInfo.zipCode}
                       onChange={(address) => handleCompanyInfoChange("zipCode", address)}
-                      placeholder="Enter Postal Code"
+                      placeholder={t("register.company.enterPostalCode")}
                       className="w-full"
                       fieldType="postalCode"
                       countryRestriction={formData.companyInfo.country}
@@ -683,13 +697,13 @@ export default function CompanyInformationPage() {
                             type="button"
                             onClick={() => removeBusiness(index)}
                               className="absolute top-4 right-4 text-red-500 hover:text-red-600"
-                              aria-label="Delete business"
+                              aria-label={t("register.company.removeBusiness")}
                             >
                             <Trash2 className="w-5 h-5" />
                           </button>
                            <div className="space-y-6">
-                            <h2 className="text-lg font-semibold text-gray-800">Business {index + 1} Information</h2>
-                            {renderBusinessForm(index, business, updateBusiness, updateBusinessAddress, companyMainIso)}
+                            <h2 className="text-lg font-semibold text-gray-800">{t("register.company.businessInfoNumber").replace("{number}", String(index + 1))}</h2>
+                            {renderBusinessForm(index, business, updateBusiness, updateBusinessAddress, companyMainIso, t)}
                            </div>
                       </CardContent>
                     </Card>
@@ -697,8 +711,8 @@ export default function CompanyInformationPage() {
 
                   {index === 0 && (
                     <div className="space-y-6">
-                      <h2 className="text-lg font-semibold text-gray-800">Business 1 Information</h2>
-                      {renderBusinessForm(index, business, updateBusiness, updateBusinessAddress, companyMainIso)}
+                      <h2 className="text-lg font-semibold text-gray-800">{t("register.company.businessInfoNumber").replace("{number}", "1")}</h2>
+                      {renderBusinessForm(index, business, updateBusiness, updateBusinessAddress, companyMainIso, t)}
                     </div>
                   )}
                 </div>
@@ -717,7 +731,7 @@ export default function CompanyInformationPage() {
               <span className="mb-2 flex items-center justify-center w-8 h-8 rounded-full bg-[#111827]">
                 <Plus className="w-4 h-4 text-white" strokeWidth={3} />
               </span>
-              <span className="text-sm font-semibold text-gray-700">Add Business</span>
+              <span className="text-sm font-semibold text-gray-700">{t("register.company.addBusiness")}</span>
             </button>
           </div>
 
@@ -728,10 +742,10 @@ export default function CompanyInformationPage() {
               variant="outline"
               className="px-8 h-[50px] text-base font-semibold border-gray-300 text-gray-700 hover:bg-gray-50"
             >
-              Back
+              {t("common.back")}
             </Button>
             <RegisterButton type="button" onClick={handleSubmit}>
-              Submit
+              {t("common.submit")}
             </RegisterButton>
           </div>
         </div>
@@ -746,7 +760,8 @@ function renderBusinessForm(
   business: any, 
   updateBusiness: any, 
   updateBusinessAddress: any,
-  defaultCompanyIso: Country 
+  defaultCompanyIso: Country,
+  t: (key: string) => string
 ) {
   const currentCountryIso = getCountryIsoCode(business.country) || defaultCompanyIso;
 
@@ -754,11 +769,11 @@ function renderBusinessForm(
     <>
       <div className="space-y-2">
         <Label htmlFor={`businessName-${index}`} className="text-sm font-semibold text-gray-700">
-          Business Name
+          {t("register.company.businessName")}
         </Label>
         <Input
           id={`businessName-${index}`}
-          placeholder="Enter Restaurant Name"
+          placeholder={t("register.company.enterBusinessName")}
           value={business.businessName}
           onChange={(e) => updateBusiness(index, "businessName", e.target.value)}
           className="w-full"
@@ -768,11 +783,11 @@ function renderBusinessForm(
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor={`ownerDirector-${index}`} className="text-sm font-semibold text-gray-700">
-            Owner/Managing Director <span className="text-red-500">*</span>
+            {t("register.company.ownerDirector")} <span className="text-red-500">*</span>
           </Label>
           <Input
             id={`ownerDirector-${index}`}
-            placeholder="Enter Director"
+            placeholder={t("register.company.enterOwnerName")}
             value={business.ownerDirector}
             onChange={(e) => updateBusiness(index, "ownerDirector", e.target.value)}
             className="w-full"
@@ -781,7 +796,7 @@ function renderBusinessForm(
 
         <div className="space-y-2">
           <Label htmlFor={`ownerTelephone-${index}`} className="text-sm font-semibold text-gray-700">
-            Telephone number <span className="text-red-500">*</span>
+            {t("register.company.phone")} <span className="text-red-500">*</span>
           </Label>
           <PhoneInput
             international
@@ -801,12 +816,12 @@ function renderBusinessForm(
 
       <div className="space-y-2">
         <Label htmlFor={`ownerEmail-${index}`} className="text-sm font-semibold text-gray-700">
-          E-mail address <span className="text-red-500">*</span>
+          {t("register.company.email")} <span className="text-red-500">*</span>
         </Label>
         <Input
           id={`ownerEmail-${index}`}
           type="email"
-          placeholder="Enter E-mail address"
+          placeholder={t("register.company.enterEmail")}
           value={business.ownerEmail}
           onChange={(e) => updateBusiness(index, "ownerEmail", e.target.value)}
           className="w-full"
@@ -825,7 +840,7 @@ function renderBusinessForm(
           htmlFor={`differentContact-${index}`}
           className="text-sm font-normal text-gray-700 cursor-pointer leading-relaxed"
         >
-          Different contact details of the contact person
+          {t("register.company.differentContact")}
         </Label>
       </div>
 
@@ -834,11 +849,11 @@ function renderBusinessForm(
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor={`contactPerson-${index}`} className="text-sm font-semibold text-gray-700">
-                Contact Person <span className="text-red-500">*</span>
+                {t("register.company.contactPerson")} <span className="text-red-500">*</span>
               </Label>
               <Input
                 id={`contactPerson-${index}`}
-                placeholder="Enter Contact Person"
+                placeholder={t("register.company.enterContactPerson")}
                 value={business.contactPerson}
                 onChange={(e) => updateBusiness(index, "contactPerson", e.target.value)}
                 className="w-full"
@@ -847,7 +862,7 @@ function renderBusinessForm(
 
             <div className="space-y-2">
               <Label htmlFor={`contactTelephone-${index}`} className="text-sm font-semibold text-gray-700">
-                Telephone number <span className="text-red-500">*</span>
+                {t("register.company.phone")} <span className="text-red-500">*</span>
               </Label>
               <PhoneInput
                 international
@@ -867,12 +882,12 @@ function renderBusinessForm(
 
           <div className="space-y-2">
             <Label htmlFor={`contactEmail-${index}`} className="text-sm font-semibold text-gray-700">
-              E-mail address <span className="text-red-500">*</span>
+              {t("register.company.email")} <span className="text-red-500">*</span>
             </Label>
             <Input
               id={`contactEmail-${index}`}
               type="email"
-              placeholder="Enter E-mail address"
+              placeholder={t("register.company.enterEmail")}
               value={business.contactEmail}
               onChange={(e) => updateBusiness(index, "contactEmail", e.target.value)}
               className="w-full"
@@ -883,11 +898,11 @@ function renderBusinessForm(
       )}
 
       <div className="space-y-6 border-t pt-6">
-        <h2 className="text-lg font-semibold text-gray-800">Business {index + 1} Address Information</h2>
+        <h2 className="text-lg font-semibold text-gray-800">{t("register.company.businessAddressInfo").replace("{number}", String(index + 1))}</h2>
 
         <div className="space-y-2">
           <Label htmlFor={`businessStreet-${index}`} className="text-sm font-semibold text-gray-700">
-            Street and House number
+            {t("register.company.street")}
           </Label>
           <AddressAutocomplete
             value={business.street}
@@ -904,7 +919,7 @@ function renderBusinessForm(
                 updateBusiness(index, "street", address);
               }
             }}
-            placeholder="Enter Location"
+            placeholder={t("register.company.enterLocation")}
             className="w-full"
           />
         </div>
@@ -912,12 +927,12 @@ function renderBusinessForm(
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor={`businessCity-${index}`} className="text-sm font-semibold text-gray-700">
-              City
+              {t("register.company.city")}
             </Label>
             <AddressAutocomplete
               value={business.city}
               onChange={(address) => updateBusiness(index, "city", address)}
-              placeholder="Enter City"
+              placeholder={t("register.company.enterCity")}
               className="w-full"
               fieldType="city"
               countryRestriction={business.country}
@@ -926,12 +941,12 @@ function renderBusinessForm(
 
           <div className="space-y-2">
             <Label htmlFor={`businessPostalCode-${index}`} className="text-sm font-semibold text-gray-700">
-              Postal code
+              {t("register.company.postalCode")}
             </Label>
             <AddressAutocomplete
               value={business.postalCode}
               onChange={(address) => updateBusiness(index, "postalCode", address)}
-              placeholder="Enter Postal Code"
+              placeholder={t("register.company.enterPostalCode")}
               className="w-full"
               fieldType="postalCode"
               countryRestriction={business.country}
@@ -942,12 +957,12 @@ function renderBusinessForm(
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor={`businessState-${index}`} className="text-sm font-semibold text-gray-700">
-              Federal State <span className="text-red-500">*</span>
+              {t("register.company.federalState")} <span className="text-red-500">*</span>
             </Label>
             <AddressAutocomplete
               value={business.federalState}
               onChange={(address) => updateBusiness(index, "federalState", address)}
-              placeholder="Enter State"
+              placeholder={t("register.company.enterState")}
               className="w-full"
               fieldType="state"
               countryRestriction={business.country}
@@ -956,7 +971,7 @@ function renderBusinessForm(
 
           <div className="space-y-2">
             <Label htmlFor={`businessCountry-${index}`} className="text-sm font-semibold text-gray-700">
-              Country <span className="text-red-500">*</span>
+              {t("register.company.country")} <span className="text-red-500">*</span>
             </Label>
             <AddressAutocomplete
               value={business.country}
@@ -964,7 +979,7 @@ function renderBusinessForm(
                 updateBusiness(index, "country", address);
                 updateBusiness(index, "federalState", "");
               }}
-              placeholder="Enter Country"
+              placeholder={t("register.company.enterCountry")}
               className="w-full"
               fieldType="country"
             />

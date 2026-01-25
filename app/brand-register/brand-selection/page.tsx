@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import RegisterButton from "@/components/RegisterButton";
 import BrandProgressBar from "@/components/BrandProgressBar";
+import LanguageSwitcher from "@/components/LanguageSwitcher";
 
 interface DeliveryPlatform {
   id: string;
@@ -233,7 +234,12 @@ export default function BrandSelectionPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 relative">
+      {/* Language Switcher - Top Right */}
+      <div className="absolute top-4 right-4 z-10">
+        <LanguageSwitcher />
+      </div>
+      
       <BrandProgressBar currentStep={1} />
 
       <div className="max-w-6xl mx-auto px-4 py-6">

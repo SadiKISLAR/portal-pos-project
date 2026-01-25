@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
       );
     } catch (registrationError: any) {
       // Custom User Register opsiyonel - hata verirse sadece log'la ve devam et
-      console.warn("Custom User Register oluşturulamadı (opsiyonel):", registrationError?.message);
+      console.warn("Could not create Custom User Register (optional):", registrationError?.message);
     }
 
     // 3) Lead oluştur (User ve Custom User Register oluşturulduktan sonra)
@@ -226,7 +226,7 @@ export async function POST(req: NextRequest) {
     ) {
       return NextResponse.json(
         {
-          error: "Bu email adresi zaten kullanılıyor. Lütfen farklı bir email adresi deneyin.",
+          error: "This email address is already in use. Please try a different email address.",
           errorType: "email_exists",
         },
         { status: 400 }
@@ -251,17 +251,17 @@ export async function POST(req: NextRequest) {
       ));
     
     if (isPasswordError) {
-      // ERPNext'in parola hatasını daha anlaşılır hale getir
-      let userFriendlyMessage = "Parola gereksinimleri karşılanmıyor. Lütfen daha güçlü bir parola kullanın.";
+      // Make ERPNext password error more user-friendly
+      let userFriendlyMessage = "Password requirements not met. Please use a stronger password.";
       
       if (errorText.includes("commonly used password") || errorText.includes("too common")) {
-        userFriendlyMessage = "Bu parola çok yaygın kullanılan bir parolaya benziyor. Lütfen daha benzersiz bir parola seçin.";
+        userFriendlyMessage = "This password is too common. Please choose a more unique password.";
       } else if (errorText.includes("all-uppercase") || errorText.includes("all-lowercase")) {
-        userFriendlyMessage = "Parola hem büyük hem küçük harf içermelidir.";
+        userFriendlyMessage = "Password must contain both uppercase and lowercase letters.";
       } else if (errorText.includes("too short")) {
-        userFriendlyMessage = "Parola çok kısa. Lütfen daha uzun bir parola kullanın.";
+        userFriendlyMessage = "Password is too short. Please use a longer password.";
       } else if (errorText.includes("too long")) {
-        userFriendlyMessage = "Parola çok uzun. Lütfen daha kısa bir parola kullanın.";
+        userFriendlyMessage = "Password is too long. Please use a shorter password.";
       }
       
       return NextResponse.json(

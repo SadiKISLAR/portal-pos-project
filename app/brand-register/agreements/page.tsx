@@ -13,6 +13,7 @@ import dynamic from "next/dynamic";
 import { PDFDocument, rgb } from "pdf-lib";
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
+import LanguageSwitcher from "@/components/LanguageSwitcher";
 
 // Signature Canvas dinamik import
 const SignatureCanvas = dynamic(
@@ -132,7 +133,7 @@ export default function AgreementsPage() {
             statusText: response.statusText,
             error: errorData.error,
           });
-          throw new Error(`PDF yüklenemedi (${response.status}): ${errorData.error || response.statusText}`);
+          throw new Error(`Could not load PDF (${response.status}): ${errorData.error || response.statusText}`);
         }
 
         const arrayBuffer = await response.arrayBuffer();
@@ -162,11 +163,11 @@ export default function AgreementsPage() {
         });
         
         // Daha detaylı hata mesajı
-        let errorMessage = err.message || "PDF yüklenemedi.";
+        let errorMessage = err.message || "Could not load PDF.";
         if (err.message?.includes('CORS') || err.message?.includes('cors')) {
-          errorMessage = "CORS hatası: PDF sunucusu erişime izin vermiyor.";
+          errorMessage = "CORS error: PDF server does not allow access.";
         } else if (err.message?.includes('Failed to fetch')) {
-          errorMessage = "Ağ hatası: PDF sunucusuna bağlanılamıyor.";
+          errorMessage = "Network error: Could not connect to PDF server.";
         }
         
         setBrandPdfs((prev) => ({
@@ -504,7 +505,7 @@ export default function AgreementsPage() {
       // İmzalı PDF'ler oluşturuldu - artık sayfada görünecek
       // Kullanıcı indirme butonlarını kullanarak PDF'leri indirebilir
 
-      console.log("✅ İmzalı PDF'ler oluşturuldu:", {
+      console.log("✅ Signed PDFs created:", {
         selections: selections.map(s => ({ brandId: s.brandId, brandName: getBrandName(s.brandId) })),
         signatureAdded: true,
         termsAccepted,
@@ -540,7 +541,12 @@ export default function AgreementsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 relative">
+      {/* Language Switcher - Top Right */}
+      <div className="absolute top-4 right-4 z-10">
+        <LanguageSwitcher />
+      </div>
+      
       <ToastContainer
         position="top-right"
         autoClose={3000}
@@ -636,7 +642,7 @@ export default function AgreementsPage() {
                 <div className="w-full h-[500px] bg-gray-100 rounded-lg border overflow-y-auto">
                   {selections.length === 0 ? (
                     <div className="w-full h-full flex items-center justify-center">
-                      <p className="text-gray-500">Henüz brand seçilmedi</p>
+                      <p className="text-gray-500">No brand selected yet</p>
                     </div>
                   ) : (
                     <div className="space-y-4 p-4">

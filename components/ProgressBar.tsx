@@ -2,18 +2,20 @@
 
 import React from "react";
 import { useRegistration } from "@/contexts/RegistrationContext";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { Check } from "lucide-react";
-
-const steps = [
-  { number: 1, label: "SERVICES" },
-  { number: 2, label: "REGISTRATION DOCUMENTS" },
-  { number: 3, label: "PAYMENT INFORMATION" },
-  { number: 4, label: "COMPANY INFORMATION" },
-];
 
 export default function ProgressBar() {
   const { formData } = useRegistration();
+  const { t } = useLanguage();
   const currentStep = formData.currentStep;
+
+  const steps = [
+    { number: 1, label: t("progressBar.services") },
+    { number: 2, label: t("progressBar.registrationDocuments") },
+    { number: 3, label: t("progressBar.paymentInformation") },
+    { number: 4, label: t("progressBar.companyInformation") },
+  ];
 
   return (
     <div className="w-full mb-8">
