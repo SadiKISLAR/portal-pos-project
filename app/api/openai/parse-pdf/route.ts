@@ -3,6 +3,9 @@ import { NextRequest, NextResponse } from "next/server";
 // Node.js runtime kullan
 export const runtime = "nodejs";
 
+// Vercel timeout ayarları
+export const maxDuration = 60; // Pro plan için 60 saniye (Hobby plan'da 10 saniye limit var)
+
 // OpenAI Assistants API ile PDF'den metin çıkar (Code Interpreter kullanarak - ChatGPT gibi)
 async function extractTextFromPdfWithAssistant(pdfBuffer: Buffer, apiKey: string): Promise<string> {
   console.log("📄 Reading PDF with OpenAI Assistants API (Code Interpreter)...");
@@ -153,9 +156,20 @@ Belgedeki tüm metni ve değerleri döndür.`,
       
       let runStatus = run.status;
       let attempts = 0;
-      const maxAttempts = 120; // 120 saniye timeout (Code Interpreter için daha uzun)
+      // Vercel timeout limitleri: Hobby=10s, Pro=60s, Enterprise=300s
+      // Güvenli limit: 50 saniye (Pro plan için)
+      const maxAttempts = 50; // 50 saniye timeout (Vercel Pro plan limiti)
+      const startTime = Date.now();
+      const maxDuration = 50000; // 50 saniye milisaniye cinsinden
       
       while (runStatus !== "completed" && runStatus !== "failed" && runStatus !== "expired" && attempts < maxAttempts) {
+        // Vercel timeout kontrolü
+        const elapsed = Date.now() - startTime;
+        if (elapsed > maxDuration) {
+          console.warn("⏰ Vercel timeout limitine yaklaşıldı, işlem durduruluyor");
+          throw new Error("PDF reading timeout - Vercel function timeout limit reached. Please try with a smaller PDF or upgrade to Pro plan.");
+        }
+        
         await new Promise(resolve => setTimeout(resolve, 1000));
         
         const statusResponse = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs/${runId}`, {
@@ -165,6 +179,11 @@ Belgedeki tüm metni ve değerleri döndür.`,
           },
         });
         
+        if (!statusResponse.ok) {
+          const errorData = await statusResponse.json().catch(() => ({}));
+          throw new Error(`Failed to check run status: ${JSON.stringify(errorData)}`);
+        }
+        
         const statusData = await statusResponse.json();
         runStatus = statusData.status;
         attempts++;
@@ -172,10 +191,16 @@ Belgedeki tüm metni ve değerleri döndür.`,
         if (attempts % 10 === 0) {
           console.log(`⏳ Durum: ${runStatus} (${attempts}s)`);
         }
+        
+        // Eğer run failed veya expired olduysa hata fırlat
+        if (runStatus === "failed" || runStatus === "expired") {
+          const errorMsg = statusData.last_error?.message || `Run ${runStatus}`;
+          throw new Error(`PDF reading failed: ${errorMsg}`);
+        }
       }
       
       if (runStatus !== "completed") {
-        throw new Error(`Run failed to complete: ${runStatus}`);
+        throw new Error(`Run failed to complete: ${runStatus}. Timeout after ${attempts} seconds.`);
       }
       
       console.log("✅ PDF reading completed");
@@ -291,6 +316,19 @@ export async function POST(req: NextRequest) {
       }
     } catch (extractError: any) {
       console.error("PDF reading error:", extractError);
+      
+      // Timeout hatası için özel mesaj
+      if (extractError.message?.includes("timeout") || extractError.message?.includes("Vercel")) {
+        return NextResponse.json(
+          { 
+            error: "PDF reading timeout - The PDF is too large or complex.",
+            suggestion: "Please try with a smaller PDF file, or enter the information manually. If you're on Vercel Hobby plan, consider upgrading to Pro plan for longer processing times.",
+            details: extractError.message
+          },
+          { status: 408 } // 408 Request Timeout
+        );
+      }
+      
       return NextResponse.json(
         { 
           error: "Could not read PDF.",
