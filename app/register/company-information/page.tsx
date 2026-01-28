@@ -420,6 +420,8 @@ export default function CompanyInformationPage() {
     }
   };
 
+  const [submitting, setSubmitting] = useState(false);
+
   const handleSubmit = async () => {
     // Debug: check formData values
     console.log("📋 Current formData.companyInfo:", formData.companyInfo);
@@ -458,6 +460,8 @@ export default function CompanyInformationPage() {
       return;
     }
 
+    setSubmitting(true);
+
     try {
       const cleanCompanyInfo: any = {};
       if (formData.companyInfo.companyName) cleanCompanyInfo.companyName = formData.companyInfo.companyName;
@@ -487,7 +491,7 @@ export default function CompanyInformationPage() {
       console.log("  - cleanCompanyInfo:", JSON.stringify(cleanCompanyInfo, null, 2));
       console.log("  - businesses:", JSON.stringify(businesses, null, 2));
       
-      // Registration status'u "Completed" olarak işaretle (son sayfa)
+      // Önce Lead'i kaydet (isCompleted: false - henüz imza bekleniyor)
       const res = await fetch("/api/erp/update-lead", {
         method: "POST",
         headers: {
@@ -498,7 +502,7 @@ export default function CompanyInformationPage() {
           companyInfo: cleanCompanyInfo,
           businesses: businesses,
           documents: {
-            isCompleted: true // Registration tamamlandı
+            isCompleted: false // E-imza bekliyor, henüz tamamlanmadı
           }
         }),
       });
@@ -509,17 +513,71 @@ export default function CompanyInformationPage() {
       if (!res.ok || !data.success) {
         console.error("❌ Update lead failed:", data);
         alert(data.error || t("register.company.updateFailed"));
+        setSubmitting(false);
         return;
       }
       
       console.log("✅ Lead updated successfully");
       
+      // E-imza token oluştur
+      console.log("📝 Creating e-signature token...");
+      let tokenRes;
+      let tokenData;
+      
+      try {
+        tokenRes = await fetch("/api/e-signature/create-token", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ email: userEmail }),
+        });
+
+        tokenData = await tokenRes.json();
+        console.log("📥 E-signature token response:", tokenData);
+        console.log("📥 Response status:", tokenRes.status);
+        console.log("📥 Response ok:", tokenRes.ok);
+      } catch (fetchError: any) {
+        console.error("❌ Fetch error creating token:", fetchError);
+        alert("E-imza token oluşturulurken bir hata oluştu: " + (fetchError.message || "Bilinmeyen hata"));
+        setSubmitting(false);
+        return;
+      }
+
+      if (!tokenRes.ok || !tokenData.success) {
+        console.error("❌ E-signature token creation failed:", tokenData);
+        console.error("  - Status:", tokenRes.status);
+        console.error("  - Error:", tokenData.error);
+        console.error("  - Details:", tokenData.details);
+        
+        // Özel hata mesajları
+        let errorMessage = "Kayıt tamamlandı ancak e-imza linki oluşturulamadı.";
+        
+        if (tokenData.error?.includes("field") || tokenData.error?.includes("custom_esignature")) {
+          errorMessage = "⚠️ E-imza field'ları ERPNext'te tanımlı değil!\n\n" +
+            "Lütfen şu field'ları ERPNext Lead DocType'ına ekleyin:\n" +
+            (tokenData.requiredFields?.join("\n") || 
+             "- custom_esignature_token\n" +
+             "- custom_esignature_token_expiry\n" +
+             "- custom_registration_status");
+        } else if (tokenData.error) {
+          errorMessage = tokenData.error + (tokenData.details ? "\n\nDetay: " + JSON.stringify(tokenData.details) : "");
+        }
+        
+        alert(errorMessage);
+        setSubmitting(false);
+        return;
+      }
+
+      console.log("✅ E-signature token created:", tokenData.signatureUrl);
+      
       // Company info'yu localStorage'a kaydet (validation için)
       try {
         localStorage.setItem("companyInfo", JSON.stringify(cleanCompanyInfo));
-        console.log("✅ Company info saved to localStorage:", cleanCompanyInfo);
+        localStorage.setItem("esignatureUrl", tokenData.signatureUrl);
+        console.log("✅ Company info and e-signature URL saved to localStorage");
       } catch (e) {
-        console.error("❌ Error saving companyInfo to localStorage:", e);
+        console.error("❌ Error saving to localStorage:", e);
       }
       
       // parsedCompanyInfo'yu temizle (artık kaydedildi)
@@ -528,14 +586,26 @@ export default function CompanyInformationPage() {
         console.log("✅ Cleared parsedCompanyInfo from localStorage");
       } catch (e) {}
       
-      // Registration tamamlandı, dashboard'a yönlendir
-      console.log("🚀 Registration completed! Redirecting to dashboard...");
-      alert(t("register.company.registrationCompleted"));
+      // Kullanıcıya e-imza hakkında bilgi ver
+      const confirmMessage = t("register.company.registrationPendingSignature") || 
+        `Kayıt işleminiz tamamlandı!\n\nSözleşmenizi imzalamanız için size bir e-posta gönderilecektir.\n\nE-imza linkiniz:\n${tokenData.signatureUrl}\n\nBu linki şimdi açmak ister misiniz?`;
+      
+      const openNow = confirm(confirmMessage);
+      
+      if (openNow) {
+        // E-imza sayfasını yeni sekmede aç
+        window.open(tokenData.signatureUrl, "_blank");
+      }
+      
+      // Dashboard'a yönlendir
+      console.log("🚀 Redirecting to dashboard...");
       router.push("/dashboard");
       
     } catch (error) {
+      console.error("❌ Submit error:", error);
       alert(t("register.company.updateFailed"));
-      return;
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -744,8 +814,15 @@ export default function CompanyInformationPage() {
             >
               {t("common.back")}
             </Button>
-            <RegisterButton type="button" onClick={handleSubmit}>
-              {t("common.submit")}
+            <RegisterButton type="button" onClick={handleSubmit} disabled={submitting}>
+              {submitting ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  {t("common.loading") || "Yükleniyor..."}
+                </>
+              ) : (
+                t("common.submit")
+              )}
             </RegisterButton>
           </div>
         </div>
